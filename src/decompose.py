@@ -1,6 +1,9 @@
 import json
+from logging import getLogger
 from textwrap import dedent
 from utils import run_chat_completion
+
+logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
@@ -63,11 +66,21 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
         tools=TOOLS,
         tool_choice=TOOL_CHOICE,
     )
+    if ret is None:
+        logger.error("Failed to run claim extraction.")
+        return []
     for tool_call in ret.choices[0].message.tool_calls:
         if tool_call.function.name == "create_claim_list":
-            claims = json.loads(tool_call.function.arguments).get("claims", [])
-            assert isinstance(claims, list) and all(
-                isinstance(claim, str) for claim in claims
-            )
-            return claims
+            try:
+                claims = json.loads(tool_call.function.arguments).get("claims", [])
+                assert isinstance(claims, list) and all(
+                    isinstance(claim, str) for claim in claims
+                )
+                return claims
+            except json.JSONDecoder:
+                logger.error(f"Failed to parse JSON: {tool_call.function.arguments}")
+            except AssertionError:
+                logger.error(f"Invalid claims: {tool_call.function.arguments}")
+            except Exception as e:
+                logger.error(f"An error occurred: {e}")
     return []
