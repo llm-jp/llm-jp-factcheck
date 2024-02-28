@@ -4,7 +4,7 @@ from os import getenv
 from typing import Optional
 
 from dotenv import load_dotenv
-from openai import AzureOpenAI
+from openai import AzureOpenAI, ChatCompletion
 
 logger = getLogger(__name__)
 
@@ -22,7 +22,7 @@ def _run_chat_completion(
     system_prompt: str,
     user_prompt: str,
     **kwargs,
-) -> str:
+) -> ChatCompletion:
     """Run a chat completion.
 
     Args:
@@ -32,9 +32,9 @@ def _run_chat_completion(
         kwargs: Keyword arguments.
 
     Returns:
-        str: A chat completion.
+        ChatCompletion: A chat completion.
     """
-    ret = client.chat.completions.create(
+    return client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -42,7 +42,6 @@ def _run_chat_completion(
         ],
         **kwargs,
     )
-    return ret.choices[0].message.content
 
 
 def run_chat_completion(
@@ -52,7 +51,7 @@ def run_chat_completion(
     num_retries: int = 3,
     sleep_time: int = 5,
     **kwargs,
-) -> Optional[str]:
+) -> Optional[ChatCompletion]:
     """Run a chat completion.
 
     Args:
@@ -64,7 +63,7 @@ def run_chat_completion(
         kwargs: Keyword arguments.
 
     Returns:
-        str: A chat completion.
+        Optional[ChatCompletion]: A chat completion.
     """
     for _ in range(num_retries):
         try:
