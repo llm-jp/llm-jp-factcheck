@@ -1,17 +1,18 @@
 import json
 from logging import getLogger
 from textwrap import dedent
-from utils import run_chat_completion
+
+from utils import client
 
 logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
-    You are provided with a document. Your task is to decompose the text into atomic claims.
+    You are provided with a document. Your task is to decompose the text into atomic claims so that each claim represents one context-independent fact.
     For example, the document "Mary is a five-year old girl, she likes playing piano and she doesn't like cookies." is decomposed into the following claims:
-    1. Mary is a five-year old girl.
-    2. Mary likes playing piano.
-    3. Mary doesn't like cookies.
+    - Mary is a five-year old girl.
+    - Mary likes playing piano.
+    - Mary doesn't like cookies.
     """
 )
 
@@ -23,30 +24,26 @@ USER_PROMPT = dedent(
     """
 )
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "create_claim_list",
-            "description": "Decompose text into atomic claims, each representing one context-independent fact.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "claims": {
-                        "type": "array",
-                        "description": "A list of claims, each representing one context-independent fact.",
-                        "items": {
-                            "type": "string",
-                        },
-                    },
+TOOL = {
+    "type": "function",
+    "function": {
+        "name": "createClaimList",
+        "description": "Create a list of atomic claims, each representing one context-independent fact.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "description": "A list of claims.",
+                    "items": {"type": "string"},
                 },
-                "required": ["claims"],
             },
+            "required": ["claims"],
         },
-    }
-]
+    },
+}
 
-TOOL_CHOICE = {"type": "function", "function": {"name": "create_claim_list"}}
+TOOL_CHOICE = {"type": "function", "function": {"name": "createClaimList"}}
 
 
 def decompose_document_into_claims(document: str, model: str) -> list[str]:
@@ -59,31 +56,28 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
     Returns:
         list[str]: A list of statements.
     """
-    ret = run_chat_completion(
+    if document.strip() == "":
+        return []
+
+    ret = client.chat.completions.create(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=USER_PROMPT.format(document=document),
-        tools=TOOLS,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT.format(document=document)},
+        ],
+        tools=[TOOL],
         tool_choice=TOOL_CHOICE,
     )
-    if ret is None:
-        logger.error("Failed to run claim extraction.")
-        return []
     for tool_call in ret.choices[0].message.tool_calls:
-        if tool_call.function.name == "create_claim_list":
+        if tool_call.function.name == "createClaimList":
             try:
                 claims = json.loads(tool_call.function.arguments).get("claims", [])
-                assert isinstance(claims, list) and all(
-                    isinstance(claim, str) for claim in claims
-                )
-                return claims
-            except json.JSONDecoder:
-                logger.error(f"Failed to parse JSON: {tool_call.function.arguments}")
-            except AssertionError:
-                logger.error(f"Invalid claims: {tool_call.function.arguments}")
-            except Exception as e:
-                logger.error(f"An error occurred: {e}")
-    return []
+            except json.JSONDecodeError:
+                raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
+            if not isinstance(claims, list) or not all(isinstance(claim, str) for claim in claims):
+                raise ValueError(f"Invalid claims: {tool_call.function.arguments}")
+            return claims
+    raise ValueError("Failed to extract claims")
 
 
 if __name__ == "__main__":

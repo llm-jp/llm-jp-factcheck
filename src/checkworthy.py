@@ -1,17 +1,18 @@
 import json
 from logging import getLogger
 from textwrap import dedent
-from utils import run_chat_completion
+
+from utils import client
 
 logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
-    You are provided with texts. Your task is to identify whether the texts are checkworthy in the context of fact-checking.
-    For example, the following texts are checkworthy:
+    You are provided with texts. Your task is to identify whether each of them is worth fact-checking.
+    For example, the following texts are check-worthy:
     - Friends is a great TV series
     - The Stanford Prison Experiment was conducted in the basement of Encina Hall.
-    while the following texts are not checkworthy:
+    while the following texts are not check-worthy:
     - I think Apple is a good company.
     - Are you sure Preslav is a professor in MBZUAI?
     - As a language model, I can't provide these info.
@@ -20,36 +21,34 @@ SYSTEM_PROMPT = dedent(
 
 USER_PROMPT = dedent(
     """\
-    Identify whether the following texts are checkworthy in the context of fact-checking:
+    Identify whether the following texts are check-worthy in the context of fact-checking:
     ---
     {texts}
     """
 )
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "set_checkworthy_labels",
-            "description": "Identify whether the texts are checkworthy in the context of fact-checking.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "labels": {
-                        "type": "array",
-                        "description": "A list of labels, which is True if the text is checkworthy and False otherwise.",
-                        "items": {
-                            "type": "boolean",
-                        },
+TOOL = {
+    "type": "function",
+    "function": {
+        "name": "setCheckworthyLabels",
+        "description": "Set check-worthy labels by identifying whether the texts are worth fact-checking.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "labels": {
+                    "type": "array",
+                    "description": "A list of labels, which is True if the text is check-worthy and False otherwise.",
+                    "items": {
+                        "type": "boolean",
                     },
                 },
-                "required": ["labels"],
             },
+            "required": ["labels"],
         },
-    }
-]
+    },
+}
 
-TOOL_CHOICE = {"type": "function", "function": {"name": "set_checkworthy_labels"}}
+TOOL_CHOICE = {"type": "function", "function": {"name": "setCheckworthyLabels"}}
 
 
 def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
@@ -62,29 +61,29 @@ def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
     Returns:
         list[str]: A list of statements.
     """
-    texts = "\n".join(f"{i}. {claim}" for i, claim in enumerate(claims, 1))
-    ret = run_chat_completion(
+    if not claims:
+        return []
+
+    texts = "\n".join(f"- {claim}" for claim in claims)
+    ret = client.chat.completions.create(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=USER_PROMPT.format(texts=texts),
-        tools=TOOLS,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT.format(texts=texts)},
+        ],
+        tools=[TOOL],
         tool_choice=TOOL_CHOICE,
     )
-    if ret is None:
-        logger.error("Failed to run claim extraction.")
     for tool_call in ret.choices[0].message.tool_calls:
-        if tool_call.function.name == "set_checkworthy_labels":
+        if tool_call.function.name == "setCheckworthyLabels":
             try:
                 labels = json.loads(tool_call.function.arguments).get("labels", [])
-                assert isinstance(labels, list) and all(
-                    isinstance(label, bool) for label in labels
-                )
-                return labels
-            except AssertionError:
+            except json.JSONDecodeError:
+                raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
+            if not isinstance(labels, list) or not all(isinstance(label, bool) for label in labels):
                 logger.error(f"Invalid labels: {tool_call.function.arguments}")
-            except Exception as e:
-                logger.error(f"An error occurred: {e}")
-    return []
+            return labels
+    raise ValueError("Failed to identify check-worthiness.")
 
 
 if __name__ == "__main__":
