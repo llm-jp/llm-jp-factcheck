@@ -84,3 +84,13 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
             except Exception as e:
                 logger.error(f"An error occurred: {e}")
     return []
+
+
+if __name__ == "__main__":
+    document = (
+        "The first thing to do is to understand the problem. "
+        "The second thing to do is to decompose the problem into smaller problems. "
+        "The third thing to do is to solve the smaller problems."
+    )
+    claims = decompose_document_into_claims(document, "gpt-4-1106-preview")
+    print(claims)
