@@ -60,9 +60,9 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
         list[str]: A list of statements.
     """
     ret = run_chat_completion(
-        model,
-        SYSTEM_PROMPT,
-        USER_PROMPT.format(document=document),
+        model=model,
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=USER_PROMPT.format(document=document),
         tools=TOOLS,
         tool_choice=TOOL_CHOICE,
     )
