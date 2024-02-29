@@ -3,3 +3,4 @@ python-dotenv
 elasticsearch
 transformers
 torch
+accelerate
