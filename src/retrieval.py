@@ -38,6 +38,21 @@ def search_documents(es: Elasticsearch, index: str, body: dict, **kwargs) -> lis
     return res["hits"]["hits"]
 
 
+def chunk_document(document: str, chunk_size: int = 500, chunk_overlap: int = 200) -> list[str]:
+    """Chunk a document into smaller pieces (called passages).
+
+    Args:
+        document (str): The document.
+        chunk_size (int, optional): The size of each chunk. Defaults to 500.
+        chunk_overlap (int, optional): The overlap between chunks. Defaults to 200.
+
+    Returns:
+        list[str]: The list of passages.
+    """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return text_splitter.split_text(document)
+
+
 def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -64,21 +79,6 @@ def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
         return torch.cosine_similarity(query_embedding, passage_embedding, dim=0).item()
 
     return calculate_relevance_score
-
-
-def chunk_document(document: str, chunk_size: int = 500, chunk_overlap: int = 200) -> list[str]:
-    """Chunk a document into smaller pieces (called passages).
-
-    Args:
-        document (str): The document.
-        chunk_size (int, optional): The size of each chunk. Defaults to 500.
-        chunk_overlap (int, optional): The overlap between chunks. Defaults to 200.
-
-    Returns:
-        list[str]: The list of passages.
-    """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    return text_splitter.split_text(document)
 
 
 if __name__ == "__main__":
