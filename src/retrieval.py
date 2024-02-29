@@ -1,11 +1,23 @@
 from elasticsearch import Elasticsearch
 
 
-def search_documents(host: str, index: str, body: dict, **kwargs) -> list[dict]:
-    """Search for documents in an index.
+def create_elasticsearch_client(host: str) -> Elasticsearch:
+    """Create an Elasticsearch client.
 
     Args:
         host (str): The Elasticsearch host.
+
+    Returns:
+        Elasticsearch: The Elasticsearch client.
+    """
+    return Elasticsearch(host)
+
+
+def search_documents(es: Elasticsearch, index: str, body: dict, **kwargs) -> list[dict]:
+    """Search for documents in an index.
+
+    Args:
+        es (Elasticsearch): The Elasticsearch client.
         index (str): The name of the Elasticsearch index.
         body (dict): The body of the request.
         **kwargs: Additional keyword arguments.
@@ -13,7 +25,6 @@ def search_documents(host: str, index: str, body: dict, **kwargs) -> list[dict]:
     Returns:
         list[dict]: The list of documents that match the query.
     """
-    es = Elasticsearch(host)
     res = es.options(request_timeout=2_400).search(
         index=index,
         body=body,
