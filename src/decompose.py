@@ -76,6 +76,7 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
                 raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
             if not isinstance(claims, list) or not all(isinstance(claim, str) for claim in claims):
                 raise ValueError(f"Invalid claims: {tool_call.function.arguments}")
+            claims = [claim.strip() for claim in claims if claim.strip()]
             return claims
     raise ValueError("Failed to extract claims")
 

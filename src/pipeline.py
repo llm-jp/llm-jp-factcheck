@@ -61,7 +61,7 @@ def main(args: argparse.Namespace) -> None:
         )
         passages = []
         for hit in hits:
-            document = tokenizer.decode(hit["_source"]["token_ids"])
+            document = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
             for passage in chunk_document(document):
                 score = scorer(claim, passage)
                 passages.append((passage, score))
@@ -72,9 +72,12 @@ def main(args: argparse.Namespace) -> None:
     logger.info("Verify the check-worthy claims.")
     for claim, passages in zip(checkworthy_claims, evidences):
         result = verify_claim(claim, passages, args.engine)
-        logger.info(f"Claim: {claim}")
+        logger.info(f"Claim: {claim.strip()}")
         logger.info(f"Result: {result['label']}")
         logger.info(f"Rationale: {result['rationale']}")
+        logger.info(f"Evidence:")
+        for i, passage in enumerate(passages, 1):
+            logger.info(f"{i}. {passage}")
 
 
 if __name__ == "__main__":
