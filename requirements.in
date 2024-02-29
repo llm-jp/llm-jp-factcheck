@@ -4,3 +4,4 @@ elasticsearch
 transformers
 torch
 accelerate
+langchain
