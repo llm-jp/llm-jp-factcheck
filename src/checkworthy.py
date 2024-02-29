@@ -82,6 +82,8 @@ def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
                 raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
             if not isinstance(labels, list) or not all(isinstance(label, bool) for label in labels):
                 logger.error(f"Invalid labels: {tool_call.function.arguments}")
+            if len(labels) != len(claims):
+                raise ValueError(f"Expected {len(claims)} labels, but got {len(labels)}.")
             return labels
     raise ValueError("Failed to identify check-worthiness.")
 
