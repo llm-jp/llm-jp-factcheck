@@ -2,6 +2,7 @@ from typing import Callable
 
 import torch
 from elasticsearch import Elasticsearch
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from transformers import AutoModel, AutoTokenizer
 
 
@@ -43,30 +44,41 @@ def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
     model = AutoModel.from_pretrained(model_name)
     model.eval()
 
-    def calculate_relevance_score(query: str, document: str) -> float:
+    def calculate_relevance_score(query: str, passage: str) -> float:
         """Calculate the relevance score between a query and a document.
 
         Args:
             query (str): The query.
-            document (str): The document.
+            passage (str): The passage.
 
         Returns:
             float: The relevance score.
         """
         query = f"passage: {query}"
-        document = f"passage: {document}"
+        passage = f"passage: {passage}"
 
         with torch.no_grad():
-            query_last_hidden_states = model(**tokenizer(query, return_tensors="pt")).last_hidden_state[0]
-        query_embedding = query_last_hidden_states.mean(dim=0)
+            query_embedding = model(**tokenizer(query, return_tensors="pt")).last_hidden_state[0].mean(dim=0)
+            passage_embedding = model(**tokenizer(passage, return_tensors="pt")).last_hidden_state[0].mean(dim=0)
 
-        with torch.no_grad():
-            document_last_hidden_states = model(**tokenizer(document, return_tensors="pt")).last_hidden_state[0]
-        document_embedding = document_last_hidden_states.mean(dim=0)
-
-        return torch.cosine_similarity(query_embedding, document_embedding, dim=0).item()
+        return torch.cosine_similarity(query_embedding, passage_embedding, dim=0).item()
 
     return calculate_relevance_score
+
+
+def chunk_document(document: str, chunk_size: int = 500, chunk_overlap: int = 200) -> list[str]:
+    """Chunk a document into smaller pieces (called passages).
+
+    Args:
+        document (str): The document.
+        chunk_size (int, optional): The size of each chunk. Defaults to 500.
+        chunk_overlap (int, optional): The overlap between chunks. Defaults to 200.
+
+    Returns:
+        list[str]: The list of passages.
+    """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return text_splitter.split_text(document)
 
 
 if __name__ == "__main__":
@@ -74,3 +86,6 @@ if __name__ == "__main__":
     print(scorer("The capital of France is Paris.", "Paris is the capital of France."))
     print(scorer("The capital of France is Paris.", "Paris is the capital of the US."))
     print(scorer("The capital of France is Paris.", "フランスの首都はパリです。"))
+
+    document = "The capital of France is Paris. The Eiffel Tower is in Paris."
+    print(chunk_document(document, chunk_size=50, chunk_overlap=20))
