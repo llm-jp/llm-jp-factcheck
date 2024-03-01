@@ -26,11 +26,11 @@ SYSTEM_PROMPT = dedent(
 
     Example:
         Input:
-            Context: 日本の初代総理大臣は誰ですか？
-            Document: 伊藤博文です。
+            Context: アメリカの初代大統領は誰ですか？
+            Document: ジョージ・ワシントンです。
         Output:
             Claims:
-                - 日本の初代総理大臣は伊藤博文です。
+                - アメリカの初代大統領はジョージ・ワシントンです。
     """
 )
 
