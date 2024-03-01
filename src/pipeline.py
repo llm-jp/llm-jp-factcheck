@@ -89,7 +89,7 @@ def main(args: argparse.Namespace) -> None:
                         score = scorer(claim, passage)
                         evidences_of_claim.append((passage, dataset, training_step, score))
 
-                evidences_of_claim.sort(key=lambda x: x[1], reverse=True)
+                evidences_of_claim.sort(key=lambda x: x[3], reverse=True)
                 evidences.append(evidences_of_claim[: args.num_evidences])
 
         with st.spinner("Verifying the check-worthy claims..."):
