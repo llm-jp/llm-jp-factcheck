@@ -107,7 +107,6 @@ def main(args: argparse.Namespace) -> None:
 
         st.subheader("Overall result")
         for claim, result_of_claim, evidences_of_claim in zip(checkworthy_claims, results, evidences):
-            st.markdown("---")
             st.markdown(f"**Claim**: {claim.strip()}")
             st.markdown(f"**Result**: {result_of_claim['label']}")
             st.markdown(f"**Rationale**: {result_of_claim['rationale']}")
@@ -115,7 +114,7 @@ def main(args: argparse.Namespace) -> None:
                 for i, (passage, dataset, training_step, _) in enumerate(evidences_of_claim, 1):
                     st.markdown(f"Evidence {i}. Dataset: {dataset}. Training Step: {training_step}.")
                     st.markdown(passage)
-                    st.markdown("---")
+                    st.markdown("--")
 
 
 if __name__ == "__main__":
