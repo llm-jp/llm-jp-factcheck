@@ -100,6 +100,14 @@ def main(args: argparse.Namespace) -> None:
                 evidences_of_claim.sort(key=lambda x: x[3], reverse=True)
                 evidences.append(evidences_of_claim[: args.num_evidences])
 
+        st.subheader("Result of evidence retrieval")
+        for i, evidences_of_claim in enumerate(evidences, 1):
+            with st.expander(f"Evidences for claim {i}"):
+                for j, (passage, dataset, training_step, score) in enumerate(evidences_of_claim, 1):
+                    st.markdown(f"Dataset: {dataset}. Training Step: {training_step}.")
+                    st.markdown(passage)
+                    st.markdown("---")
+
         with st.spinner("Verifying the check-worthy claims..."):
             results = []
             for claim, evidences_of_claim in zip(checkworthy_claims, evidences):
