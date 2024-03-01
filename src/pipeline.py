@@ -17,7 +17,8 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: The parsed arguments.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--text", type=str, required=True)
+    parser.add_argument("--document", type=str, required=True)
+    parser.add_argument("--context", type=str, default=None)
     parser.add_argument("--engine", type=str, default="gpt-4-1106-preview")
     parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-13b-v1.0")
     parser.add_argument("--es_host", type=str, default="http://localhost:9200")
@@ -35,10 +36,15 @@ def main(args: argparse.Namespace) -> None:
         args (argparse.Namespace): The command-line arguments.
     """
     logger.info("Running the fact-checking pipeline.")
-    logger.info(f"Input text: {args.text}")
+    logger.info(f"Document: {args.document}")
+    logger.info(f"Context: {args.context}")
 
-    logger.info("Decompose the input text into claims.")
-    claims = decompose_document_into_claims(args.text, args.engine)
+    logger.info("Decompose the document into claims.")
+    claims = decompose_document_into_claims(
+        document=args.document,
+        context=args.context,
+        model=args.engine,
+    )
     logger.info(f"Extracted {len(claims)} claims.")
 
     logger.info("Identify check-worthy claims.")
@@ -59,24 +65,24 @@ def main(args: argparse.Namespace) -> None:
             body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
             size=3,
         )
-        passages = []
+        evidences_of_claim = []
         for hit in hits:
             document = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
             for passage in chunk_document(document):
                 score = scorer(claim, passage)
-                passages.append((passage, score))
+                evidences_of_claim.append((passage, score))
 
-        passages.sort(key=lambda x: x[1], reverse=True)
-        evidences.append([passage for passage, _ in passages[: args.num_evidences]])
+        evidences_of_claim.sort(key=lambda x: x[1], reverse=True)
+        evidences.append([passage for passage, _ in evidences_of_claim[: args.num_evidences]])
 
     logger.info("Verify the check-worthy claims.")
-    for claim, passages in zip(checkworthy_claims, evidences):
-        result = verify_claim(claim, passages, args.engine)
+    for claim, evidences_of_claim in zip(checkworthy_claims, evidences):
+        result = verify_claim(claim, evidences_of_claim, args.engine)
         logger.info(f"Claim: {claim.strip()}")
         logger.info(f"Result: {result['label']}")
         logger.info(f"Rationale: {result['rationale']}")
-        logger.info(f"Evidence:")
-        for i, passage in enumerate(passages, 1):
+        logger.info("Evidence:")
+        for i, passage in enumerate(evidences_of_claim, 1):
             logger.info(f"{i}. {passage}")
 
 
