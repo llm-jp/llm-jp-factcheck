@@ -46,11 +46,13 @@ def main(args: argparse.Namespace) -> None:
         model=args.engine,
     )
     logger.info(f"Extracted {len(claims)} claims.")
+    logger.debug(f"Claims: {claims}")
 
     logger.info("Identify check-worthy claims.")
     checkworthy_labels = identify_checkworthiness(claims, args.engine)
     checkworthy_claims = [claim for claim, label in zip(claims, checkworthy_labels) if label]
     logger.info(f"Identified {len(checkworthy_claims)} check-worthy claims.")
+    logger.debug(f"Check-worthy claims: {checkworthy_claims}")
 
     logger.info("Retrieve evidence documents.")
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
