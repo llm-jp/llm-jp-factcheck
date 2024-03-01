@@ -68,12 +68,14 @@ def main(args: argparse.Namespace) -> None:
         evidences_of_claim = []
         for hit in hits:
             document = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
+            dataset = hit["_source"]["dataset_name"]
+            training_step = hit["_source"]["iteration"]
             for passage in chunk_document(document):
                 score = scorer(claim, passage)
-                evidences_of_claim.append((passage, score))
+                evidences_of_claim.append((passage, dataset, training_step, score))
 
         evidences_of_claim.sort(key=lambda x: x[1], reverse=True)
-        evidences.append([passage for passage, _ in evidences_of_claim[: args.num_evidences]])
+        evidences.append(evidences_of_claim[: args.num_evidences])
 
     logger.info("Verify the check-worthy claims.")
     for claim, evidences_of_claim in zip(checkworthy_claims, evidences):
@@ -82,8 +84,8 @@ def main(args: argparse.Namespace) -> None:
         logger.info(f"Result: {result['label']}")
         logger.info(f"Rationale: {result['rationale']}")
         logger.info("Evidence:")
-        for i, passage in enumerate(evidences_of_claim, 1):
-            logger.info(f"{i}. {passage}")
+        for i, (passage, dataset, training_step, _) in enumerate(evidences_of_claim, 1):
+            logger.info(f"{i}. Dataset: {dataset} Training Step: {training_step}\n{passage}")
 
 
 if __name__ == "__main__":
