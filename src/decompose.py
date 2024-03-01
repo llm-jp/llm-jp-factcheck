@@ -1,6 +1,7 @@
 import json
 from logging import getLogger
 from textwrap import dedent
+from typing import Optional
 
 from utils import client
 
@@ -8,11 +9,20 @@ logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
-    You are provided with a document. Your task is to decompose the text into atomic claims so that each claim represents one context-independent fact.
-    For example, the document "Mary is a five-year old girl, she likes playing piano and she doesn't like cookies." is decomposed into the following claims:
-    - Mary is a five-year old girl.
-    - Mary likes playing piano.
-    - Mary doesn't like cookies.
+    You are provided with a document (or an utterance) with context.
+    Your task is to decompose the document into atomic claims.
+    Each claim represents one fact.
+    Every claim should be context-independent, i.e., it should be understandable alone without the context.
+    For example, pronouns should be replaced with the actual names.
+
+    Example:
+        Input:
+            Context: What do you know about Mary?
+            Document: She likes playing piano and doesn't like cookies.
+        Output:
+            Claims:
+                - Mary likes playing piano.
+                - Mary doesn't like cookies.
     """
 )
 
@@ -20,6 +30,10 @@ USER_PROMPT = dedent(
     """\
     Decompose the following document into atomic claims:
     ---
+    [Context]
+    {context}
+    ---
+    [Document]
     {document}
     """
 )
@@ -46,15 +60,16 @@ TOOL = {
 TOOL_CHOICE = {"type": "function", "function": {"name": "createClaimList"}}
 
 
-def decompose_document_into_claims(document: str, model: str) -> list[str]:
-    """Decompose a document into a list of statements.
+def decompose_document_into_claims(document: str, model: str, context: Optional[str] = None) -> list[str]:
+    """Decompose a document into a list of claims.
 
     Args:
         document (str): A document.
         model (str): A model.
+        context (str, optional): A context. Defaults to None.
 
     Returns:
-        list[str]: A list of statements.
+        list[str]: A list of claims.
     """
     if document.strip() == "":
         return []
@@ -63,7 +78,7 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT.format(document=document)},
+            {"role": "user", "content": USER_PROMPT.format(document=document, context=context)},
         ],
         tools=[TOOL],
         tool_choice=TOOL_CHOICE,
@@ -82,10 +97,7 @@ def decompose_document_into_claims(document: str, model: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    document = (
-        "The first thing to do is to understand the problem. "
-        "The second thing to do is to decompose the problem into smaller problems. "
-        "The third thing to do is to solve the smaller problems."
-    )
-    claims = decompose_document_into_claims(document, "gpt-4-1106-preview")
+    context = "When did the First World War end?"
+    document = "It ended on 11 November 1918. It lasted for four years."
+    claims = decompose_document_into_claims(document, context=context, model="gpt-4-1106-preview")
     print(claims)
