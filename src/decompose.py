@@ -23,6 +23,14 @@ SYSTEM_PROMPT = dedent(
             Claims:
                 - Mary likes playing piano.
                 - Mary doesn't like cookies.
+
+    Example:
+        Input:
+            Context: 日本の初代総理大臣は誰ですか？
+            Document: 伊藤博文です。
+        Output:
+            Claims:
+                - 日本の初代総理大臣は伊藤博文です。
     """
 )
 
