@@ -37,7 +37,7 @@ def main(args: argparse.Namespace) -> None:
     st.title("LLM-jp Fact-Check")
 
     with st.form("form", clear_on_submit=False):
-        st.write("Please enter the document (and the context if applicable) you want to fact-check.")
+        st.write("Enter the document (and the context if applicable) you want to fact-check.")
         context = st.text_area("Context")
         document = st.text_area("Document")
         submitted = st.form_submit_button("Submit")
@@ -50,9 +50,17 @@ def main(args: argparse.Namespace) -> None:
                 model=args.engine,
             )
 
+        st.subheader("Result of claim extraction")
+        for i, claim in enumerate(claims, 1):
+            st.markdown(f"- Claim {i}: {claim}")
+
         with st.spinner("Identifying check-worthy claims..."):
             checkworthy_labels = identify_checkworthiness(claims, args.engine)
             checkworthy_claims = [claim for claim, label in zip(claims, checkworthy_labels) if label]
+
+        st.subheader("Result of check-worthy prediction")
+        for i, label in enumerate(checkworthy_labels, 1):
+            st.markdown(f"- Claim {i}: {label}")
 
         @st.cache_resource
         def _get_tokenizer(tokenizer_name_or_path: str):
@@ -97,7 +105,7 @@ def main(args: argparse.Namespace) -> None:
             for claim, evidences_of_claim in zip(checkworthy_claims, evidences):
                 results.append(verify_claim(claim, evidences_of_claim, args.engine))
 
-        st.subheader("Results")
+        st.subheader("Overall result")
         for claim, result_of_claim, evidences_of_claim in zip(checkworthy_claims, results, evidences):
             st.markdown("---")
             st.markdown(f"**Claim**: {claim.strip()}")
