@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-13b-v1.0")
     parser.add_argument("--es_host", type=str, default="http://localhost:9200")
     parser.add_argument("--es_index", type=str, default="memorization-analysis-dev")
-    parser.add_argument("--num_evidences", type=int, default=5)
+    parser.add_argument("--num_evidences", type=int, default=3)
     parser.add_argument("--embedding", type=str, default="intfloat/multilingual-e5-base")
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
     return parser.parse_args()
