@@ -8,6 +8,16 @@ SYSTEM_PROMPT = dedent(
     """\
     You are provided with a claim and a list of evidences.
     Your task is to verify whether the claim is supported by the evidences.
+
+    Example:
+        Input:
+            Claim: The earth is flat.
+            Evidences:
+                1. The earth is round.
+                2. Some people believe that the earth is flat, but they are wrong.
+        Output:
+            Label: False
+            Rationale: The claim is not supported by any of the evidences.
     """
 )
 
@@ -15,9 +25,11 @@ USER_PROMPT = dedent(
     """\
     Verify the following claim using the provided evidences:
     ---
-    Claim: {claim}
-    Passages:
-    {passages}
+    [Claim]
+    {claim}
+    ---
+    [Evidences]
+    {evidences}
     """
 )
 
@@ -25,7 +37,7 @@ TOOL = {
     "type": "function",
     "function": {
         "name": "setVerificationResult",
-        "description": "Verify a claim using a list of passages.",
+        "description": "Verify a claim according to the provided evidences.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -35,9 +47,7 @@ TOOL = {
                 },
                 "label": {
                     "type": ["boolean", "null"],
-                    "description": "A label for the verification result. "
-                    "True if the claim is supported by the evidences, and False if it is not. "
-                    "Otherwise, null.",
+                    "description": "A label for the verification result. True if the claim is supported by the evidences, and False if it is not. Otherwise, null.",
                 },
             },
             "required": ["rationale", "label"],
@@ -48,20 +58,20 @@ TOOL = {
 TOOL_CHOICE = {"type": "function", "function": {"name": "setVerificationResult"}}
 
 
-def verify_claim(claim: str, passages: list[str], model: str) -> dict[str, Any]:
+def verify_claim(claim: str, evidences: list[str], model: str) -> dict[str, Any]:
     """Verify a claim.
 
     Args:
         claim (str): A claim.
-        passages (list[str]): A list of passages.
+        evidences (list[str]): A list of evidences.
         model (str): A model.
     """
-    formatted_passages = "\n".join(f"- {i} {passage}" for i, passage in enumerate(passages, start=1))
+    formatted_evidences = "\n".join(f"- {i} {passage}" for i, passage in enumerate(evidences, start=1))
     ret = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT.format(claim=claim, passages=formatted_passages)},
+            {"role": "user", "content": USER_PROMPT.format(claim=claim, evidences=formatted_evidences)},
         ],
         tools=[TOOL],
         tool_choice=TOOL_CHOICE,
@@ -73,7 +83,7 @@ def verify_claim(claim: str, passages: list[str], model: str) -> dict[str, Any]:
             except json.JSONDecodeError:
                 raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
             if "rationale" not in arguments or "label" not in arguments:
-                raise ValueError(f"Failed to extract rationale and label: {tool_call.function.arguments}")
+                raise ValueError(f"Failed to extract rationale and/or label: {tool_call.function.arguments}")
             rationale = arguments.get("rationale")
             if not isinstance(rationale, str):
                 raise ValueError(f"Invalid rationale: {tool_call.function.arguments}")
@@ -85,9 +95,9 @@ def verify_claim(claim: str, passages: list[str], model: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    claim = "The earth is flat."
-    passages = [
-        "The earth is round.",
-        "Some people believe that the earth is flat, but they are wrong.",
+    claim = "The First World War ended in 1920."
+    evidences = [
+        "The First World War ended in 1918.",
+        "The First World War lasted from 1914 to 1918.",
     ]
-    print(verify_claim(claim, passages, "gpt-4-1106-preview"))
+    print(verify_claim(claim, evidences, "gpt-4-1106-preview"))

@@ -8,14 +8,24 @@ logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
-    You are provided with texts. Your task is to identify whether each of them is worth fact-checking.
-    For example, the following texts are check-worthy:
-    - Friends is a great TV series
-    - The Stanford Prison Experiment was conducted in the basement of Encina Hall.
-    while the following texts are not check-worthy:
-    - I think Apple is a good company.
-    - Are you sure Preslav is a professor in MBZUAI?
-    - As a language model, I can't provide these info.
+    You are provided with claims.
+    Your task is to identify whether each of them is worth fact-checking.
+
+    Example:
+        Input:
+            Claims:
+                - Friends is a great TV series.
+                - The Stanford Prison Experiment was conducted in the basement of Encina Hall.
+                - I think Apple is a good company.
+                - Are you sure Preslav is a professor in MBZUAI?
+                - As a language model, I can't provide these info.
+        Output:
+            Labels:
+                - True
+                - True
+                - False
+                - False
+                - False
     """
 )
 
@@ -23,7 +33,8 @@ USER_PROMPT = dedent(
     """\
     Identify whether the following texts are check-worthy in the context of fact-checking:
     ---
-    {texts}
+    [Claims]
+    {claims}
     """
 )
 
@@ -64,12 +75,12 @@ def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
     if not claims:
         return []
 
-    texts = "\n".join(f"- {claim}" for claim in claims)
+    formatted_claims = "\n".join(f"- {claim}" for claim in claims)
     ret = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT.format(texts=texts)},
+            {"role": "user", "content": USER_PROMPT.format(claims=formatted_claims)},
         ],
         tools=[TOOL],
         tool_choice=TOOL_CHOICE,
