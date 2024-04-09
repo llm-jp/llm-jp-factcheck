@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: The parsed arguments.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("--engine", type=str, default="gpt-4-1106-preview")
+    parser.add_argument("--engine", type=str, default="gpt-4-0613")
     parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-13b-v1.0")
     parser.add_argument("--es_host", type=str, default="http://localhost:9200")
     parser.add_argument("--es_index", type=str, default="memorization-analysis-dev")
