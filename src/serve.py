@@ -43,6 +43,12 @@ def main(args: argparse.Namespace) -> None:
         submitted = st.form_submit_button("Submit")
 
     if submitted:
+        st.subheader("Input context")
+        st.markdown(context)
+
+        st.subheader("Input document")
+        st.markdown(document)
+
         with st.spinner("Decomposing the document into claims..."):
             claims = decompose_document_into_claims(
                 document=document,
@@ -60,7 +66,7 @@ def main(args: argparse.Namespace) -> None:
 
         st.subheader("Result of check-worthy prediction")
         for i, label in enumerate(checkworthy_labels, 1):
-            st.markdown(f"- Claim {i}: {label}")
+            st.markdown(f"- Claim {i}: {'Checkworthy' if label else 'Not Checkworthy'}")
 
         @st.cache_resource
         def _get_tokenizer(tokenizer_name_or_path: str):
@@ -116,7 +122,7 @@ def main(args: argparse.Namespace) -> None:
         st.subheader("Overall result")
         for claim, result_of_claim, evidences_of_claim in zip(checkworthy_claims, results, evidences):
             st.markdown(f"**Claim**: {claim.strip()}")
-            st.markdown(f"**Result**: {result_of_claim['label']}")
+            st.markdown(f"**Result**: {'Supported' if result_of_claim['label'] else 'Not Supported'}")
             st.markdown(f"**Rationale**: {result_of_claim['rationale']}")
             with st.expander("Evidence"):
                 for i, (passage, dataset, training_step, _) in enumerate(evidences_of_claim, 1):
