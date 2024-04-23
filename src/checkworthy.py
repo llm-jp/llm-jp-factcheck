@@ -21,11 +21,11 @@ SYSTEM_PROMPT = dedent(
                 - As a language model, I can't provide these info.
         Output:
             Labels:
-                - True
-                - True
-                - False
-                - False
-                - False
+                - true
+                - true
+                - false
+                - false
+                - false
     """
 )
 
