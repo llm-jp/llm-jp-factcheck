@@ -21,7 +21,7 @@ SYSTEM_PROMPT = dedent(
                 - Are you sure Preslav is a professor in MBZUAI?
                 - As a language model, I can't provide these info.
         Output:
-            Labels:
+            Labels (array of booleans):
                 - true
                 - true
                 - false

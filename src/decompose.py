@@ -20,7 +20,7 @@ SYSTEM_PROMPT = dedent(
             Context: What do you know about Mary?
             Document: She likes playing piano and doesn't like cookies.
         Output:
-            Claims:
+            Claims (array of strings):
                 - Mary likes playing piano.
                 - Mary doesn't like cookies.
 
@@ -29,7 +29,7 @@ SYSTEM_PROMPT = dedent(
             Context: アメリカの初代大統領は誰ですか？
             Document: ジョージ・ワシントンです。
         Output:
-            Claims:
+            Claims (array of strings):
                 - アメリカの初代大統領はジョージ・ワシントンです。
     """
 )

@@ -16,8 +16,8 @@ SYSTEM_PROMPT = dedent(
                 1. The earth is round.
                 2. Some people believe that the earth is flat, but they are wrong.
         Output:
-            Label: false
-            Rationale: The claim is not supported by any of the evidences.
+            Label (boolean): false
+            Rationale (string): The claim is not supported by any of the evidences.
     """
 )
 
