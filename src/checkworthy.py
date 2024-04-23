@@ -10,6 +10,7 @@ SYSTEM_PROMPT = dedent(
     """\
     You are provided with claims.
     Your task is to identify whether each of them is worth fact-checking.
+    For example, subjective claims are not usually considered worth fact-checking.
 
     Example:
         Input:
