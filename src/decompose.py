@@ -9,28 +9,33 @@ logger = getLogger(__name__)
 
 SYSTEM_PROMPT = dedent(
     """\
-    You are provided with a document (or an utterance) with context.
-    Your task is to decompose the document into atomic claims.
-    Each claim represents one fact.
-    Every claim should be context-independent, i.e., it should be understandable alone without the context.
-    For example, pronouns should be replaced with the actual names.
+    You are provided with a document (or an utterance), which may include optional context.
+    Your task is to decompose the document into individual, atomic claims.
+    Each claim should represent a single fact and must be comprehensible on its own, without the need for additional context.
+    For instance, replace pronouns with the specific names they refer to when formulating each claim.
 
     Example:
         Input:
             Context: What do you know about Mary?
             Document: She likes playing piano and doesn't like cookies.
         Output:
-            Claims (array of strings):
-                - Mary likes playing piano.
-                - Mary doesn't like cookies.
+            {
+                "claims": [
+                    "Mary likes playing piano.",
+                    "Mary doesn't like cookies."
+                ]
+            }
 
     Example:
         Input:
             Context: アメリカの初代大統領は誰ですか？
             Document: ジョージ・ワシントンです。
         Output:
-            Claims (array of strings):
-                - アメリカの初代大統領はジョージ・ワシントンです。
+            {
+                "claims": ["アメリカの初代大統領はジョージ・ワシントンです。"]
+            }
+        Note:
+            The claims should be in the same language as the document.     
     """
 )
 
@@ -105,8 +110,6 @@ def decompose_document_into_claims(document: str, model: str, context: Optional[
 
 
 if __name__ == "__main__":
-    # model = "gpt-4-1106-preview"
-    # model = "gpt-35-turbo-1106"
     model = "gpt-4-0613"
 
     documents = [

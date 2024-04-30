@@ -9,8 +9,8 @@ logger = getLogger(__name__)
 SYSTEM_PROMPT = dedent(
     """\
     You are provided with claims.
-    Your task is to identify whether each of them is worth fact-checking.
-    For example, subjective claims are not usually considered worth fact-checking.
+    Your task is to determine whether each claim should be fact-checked.
+    For example, subjective claims, trivial facts, and questions are not check-worthy.
 
     Example:
         Input:
@@ -21,18 +21,13 @@ SYSTEM_PROMPT = dedent(
                 - Are you sure Preslav is a professor in MBZUAI?
                 - As a language model, I can't provide these info.
         Output:
-            Labels (array of booleans):
-                - true
-                - true
-                - false
-                - false
-                - false
+            {"labels": [true, true, false, false, false]}
     """
 )
 
 USER_PROMPT = dedent(
     """\
-    Identify whether the following texts are check-worthy in the context of fact-checking:
+    Identify whether the following claims should be fact-checked:
     ---
     [Claims]
     {claims}
@@ -43,13 +38,13 @@ TOOL = {
     "type": "function",
     "function": {
         "name": "setCheckworthyLabels",
-        "description": "Set check-worthy labels by identifying whether the texts are worth fact-checking.",
+        "description": "Set check-worthy labels by identifying whether the claims are worth fact-checking.",
         "parameters": {
             "type": "object",
             "properties": {
                 "labels": {
                     "type": "array",
-                    "description": "A list of labels, which is True if the text is check-worthy and False otherwise.",
+                    "description": "A list of labels, which is `true` if the claim is check-worthy and `false` otherwise.",
                     "items": {
                         "type": "boolean",
                     },
@@ -101,11 +96,15 @@ def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
 
 
 if __name__ == "__main__":
+    model = "gpt-4-0613"
+
     claims = [
         "The capital of France is Paris.",
         "The first prime number is 1.",
         "I think Google is a good company.",
         "Do you think it will be sunny tomorrow?",
     ]
-    labels = identify_checkworthiness(claims, "gpt-4-1106-preview")
+
+    labels = identify_checkworthiness(claims, model=model)
+
     print(labels)

@@ -7,7 +7,7 @@ from utils import client
 SYSTEM_PROMPT = dedent(
     """\
     You are provided with a claim and a list of evidences.
-    Your task is to verify whether the claim is supported by the evidences.
+    Your task is to determine whether the evidences support the claim.
 
     Example:
         Input:
@@ -16,14 +16,16 @@ SYSTEM_PROMPT = dedent(
                 1. The earth is round.
                 2. Some people believe that the earth is flat, but they are wrong.
         Output:
-            Label (boolean): false
-            Rationale (string): The claim is not supported by any of the evidences.
+            {
+                "rationale": "The claim is not supported by any of the evidences.",
+                "label": false
+            }
     """
 )
 
 USER_PROMPT = dedent(
     """\
-    Verify the following claim using the provided evidences:
+    Determine whether the evidences support the claim:
     ---
     [Claim]
     {claim}
@@ -95,9 +97,13 @@ def verify_claim(claim: str, evidences: list[str], model: str) -> dict[str, Any]
 
 
 if __name__ == "__main__":
+    model = "gpt-4-0613"
+
     claim = "The First World War ended in 1920."
+
     evidences = [
         "The First World War ended in 1918.",
         "The First World War lasted from 1914 to 1918.",
     ]
-    print(verify_claim(claim, evidences, "gpt-4-1106-preview"))
+
+    print(verify_claim(claim, evidences, model=model))
