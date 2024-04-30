@@ -21,8 +21,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--engine", type=str, default="gpt-4-0613")
     parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-13b-v1.0")
     parser.add_argument("--es_host", type=str, default="http://localhost:9200")
-    parser.add_argument("--es_index", type=str, default="memorization-analysis-dev")
-    parser.add_argument("--num_evidences", type=int, default=3)
+    parser.add_argument("--es_dump_index", type=str, default="llm-jp-search-v1.0")
+    parser.add_argument("--es_meta_index", type=str, default="llm-jp-search-for-meta-v1.0")
+    parser.add_argument("--num_evidences", type=int, default=1)
     parser.add_argument("--embedding", type=str, default="intfloat/multilingual-e5-base")
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
     return parser.parse_args()
@@ -39,7 +40,7 @@ def main(args: argparse.Namespace) -> None:
     with st.form("form", clear_on_submit=False):
         st.write("Enter the document (and the context if applicable) you want to fact-check.")
         context = st.text_area("Context")
-        document = st.text_area("Document")
+        text = st.text_area("Document")
         submitted = st.form_submit_button("Submit")
 
     if submitted:
@@ -47,16 +48,16 @@ def main(args: argparse.Namespace) -> None:
         st.markdown(context)
 
         st.subheader("Input document")
-        st.markdown(document)
+        st.markdown(text)
 
         with st.spinner("Decomposing the document into claims..."):
             claims = decompose_document_into_claims(
-                document=document,
+                document=text,
                 context=context,
                 model=args.engine,
             )
 
-        st.subheader("Result of claim extraction")
+        st.subheader("Result of claim detection")
         for i, claim in enumerate(claims, 1):
             st.markdown(f"- Claim {i}: {claim}")
 
@@ -80,55 +81,65 @@ def main(args: argparse.Namespace) -> None:
         def _create_relevance_scorer(embedding: str):
             return create_relevance_scorer(embedding)
 
-        with st.spinner("Retrieving evidence documents..."):
-            tokenizer = _get_tokenizer(args.tokenizer_name)
-            es = _create_elasticsearch_client(args.es_host)
-            scorer = _create_relevance_scorer(args.embedding)
+        tokenizer = _get_tokenizer(args.tokenizer_name)
+        es = _create_elasticsearch_client(args.es_host)
+        scorer = _create_relevance_scorer(args.embedding)
 
-            evidences = []
-            for claim in checkworthy_claims:
-                claim_token_ids = tokenizer(claim, add_special_tokens=False)["input_ids"]
-                hits = search_documents(
+        st.subheader("Result of verifiation")
+        for claim in checkworthy_claims:
+            st.markdown(f"**Claim**: {claim.strip()}")
+            
+            with st.spinner(f'Retrieving the evidences...'):
+                claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
+                evidence_candidates = []
+                for hit in search_documents(
                     es,
-                    args.es_index,
+                    args.es_dump_index,
                     body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
                     size=3,
-                )
-                evidences_of_claim = []
-                for hit in hits:
-                    document = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
+                ):
+                    text = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
                     dataset = hit["_source"]["dataset_name"]
                     training_step = hit["_source"]["iteration"]
-                    for passage in chunk_document(document):
+                    for passage in chunk_document(text):
                         score = scorer(claim, passage)
-                        evidences_of_claim.append((passage, dataset, training_step, score))
+                        evidence_candidates.append(
+                            {
+                                "passage": passage,
+                                "dataset": dataset,
+                                "training_step": training_step,
+                                "score": score,
+                            }
+                        )
+                evidences = sorted(evidence_candidates, key=lambda x: x["score"], reverse=True)[: args.num_evidences]
 
-                evidences_of_claim.sort(key=lambda x: x[3], reverse=True)
-                evidences.append(evidences_of_claim[: args.num_evidences])
+            with st.spinner(f'Retrieving the meta information of the evidences...'):
+                for evidence in evidences:
+                    evidence_token_ids = tokenizer.encode(evidence["passage"], add_special_tokens=False)
+                    hits = search_documents(
+                        es,
+                        args.es_meta_index,
+                        body={"query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}}},
+                        size=1,
+                    )
+                    evidence["meta"] = hits[0]["_source"]["meta"]
 
-        st.subheader("Result of evidence retrieval")
-        for i, evidences_of_claim in enumerate(evidences, 1):
-            with st.expander(f"Evidences for claim {i}"):
-                for j, (passage, dataset, training_step, score) in enumerate(evidences_of_claim, 1):
-                    st.markdown(f"Dataset: {dataset}. Training Step: {training_step}.")
-                    st.markdown(passage)
+            for i, evidence in enumerate(evidences, 1):
+                with st.expander(f"Evidence {i}"):
+                    st.markdown(
+                        f"Dataset: {evidence['dataset']}"
+                        f" / Training Step: {evidence['training_step']}"
+                        f" / Meta info.: {evidence['meta']}"
+                    )
+                    st.markdown(evidence["passage"])
                     st.markdown("---")
 
-        with st.spinner("Verifying the check-worthy claims..."):
-            results = []
-            for claim, evidences_of_claim in zip(checkworthy_claims, evidences):
-                results.append(verify_claim(claim, evidences_of_claim, args.engine))
-
-        st.subheader("Overall result")
-        for claim, result_of_claim, evidences_of_claim in zip(checkworthy_claims, results, evidences):
-            st.markdown(f"**Claim**: {claim.strip()}")
-            st.markdown(f"**Result**: {'Supported' if result_of_claim['label'] else 'Not Supported'}")
-            st.markdown(f"**Rationale**: {result_of_claim['rationale']}")
-            with st.expander("Evidence"):
-                for i, (passage, dataset, training_step, _) in enumerate(evidences_of_claim, 1):
-                    st.markdown(f"Evidence {i}. Dataset: {dataset}. Training Step: {training_step}.")
-                    st.markdown(passage)
-                    st.markdown("--")
+            with st.spinner("Verifying the check-worthy claims..."):
+                result = verify_claim(claim, [e["passage"] for e in evidences], args.engine)
+            
+            st.markdown(f"**Result**: {'Supported' if result['label'] else 'Not Supported'}")
+            st.markdown(f"**Rationale**: {result['rationale']}")
+            st.markdown("--")
 
 
 if __name__ == "__main__":
