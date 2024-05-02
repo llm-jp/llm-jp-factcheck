@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 
 import streamlit as st
@@ -95,8 +96,10 @@ def main(args: argparse.Namespace) -> None:
                 for hit in search_documents(
                     es,
                     args.es_dump_index,
-                    body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
-                    size=3,
+                    body={
+                        "query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}},
+                    },
+                    size=1,
                 ):
                     text = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
                     dataset = hit["_source"]["dataset_name"]
@@ -122,15 +125,17 @@ def main(args: argparse.Namespace) -> None:
                         body={"query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}}},
                         size=1,
                     )
-                    evidence["meta"] = hits[0]["_source"]["meta"]
+                    if hits:
+                        evidence["meta"] = json.loads(hits[0]["_source"]["meta"])
+                    else:
+                        evidence["meta"] = {}
 
             for i, evidence in enumerate(evidences, 1):
                 with st.expander(f"Evidence {i}"):
-                    st.markdown(
-                        f"Dataset: {evidence['dataset']}"
-                        f" / Training Step: {evidence['training_step']}"
-                        f" / Meta info.: {evidence['meta']}"
-                    )
+                    st.markdown(f"Dataset: {evidence['dataset']}")
+                    st.markdown(f"Training Step: {evidence['training_step']}")
+                    st.markdown(f"Meta information:")
+                    st.markdown("\n".join(f"- {k}: {v}" for k, v in evidence["meta"].items()))
                     st.markdown(evidence["passage"])
                     st.markdown("---")
 
