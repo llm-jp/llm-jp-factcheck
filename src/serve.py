@@ -94,15 +94,18 @@ def main(args: argparse.Namespace) -> None:
             with st.spinner("Retrieving the evidences..."):
                 claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
                 evidence_candidates = []
-                for hit in search_documents(
+                hits = search_documents(
                     es,
                     args.es_dump_index,
                     body={
                         "query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}},
                     },
-                    size=1,
+                    size=3,
                     max_concurrent_shard_requests=64,
-                ):
+                )
+
+            with st.spinner("Extracting the most related snippets..."):
+                for hit in hits:
                     text = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
                     dataset = hit["_source"]["dataset_name"]
                     training_step = hit["_source"]["iteration"]
