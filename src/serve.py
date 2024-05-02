@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--es_meta_index", type=str, default="llm-jp-search-for-meta-v1.0")
     parser.add_argument("--num_evidences", type=int, default=1)
     parser.add_argument("--embedding", type=str, default="intfloat/multilingual-e5-base")
+
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
     return parser.parse_args()
 
@@ -100,6 +101,7 @@ def main(args: argparse.Namespace) -> None:
                         "query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}},
                     },
                     size=1,
+                    max_concurrent_shard_requests=64,
                 ):
                     text = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
                     dataset = hit["_source"]["dataset_name"]
@@ -122,8 +124,11 @@ def main(args: argparse.Namespace) -> None:
                     hits = search_documents(
                         es,
                         args.es_meta_index,
-                        body={"query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}}},
+                        body={
+                            "query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}},
+                        },
                         size=1,
+                        max_concurrent_shard_requests=64,
                     )
                     if hits:
                         evidence["meta"] = json.loads(hits[0]["_source"]["meta"])
