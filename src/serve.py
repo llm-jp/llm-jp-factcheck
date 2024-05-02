@@ -89,8 +89,8 @@ def main(args: argparse.Namespace) -> None:
         st.subheader("Result of verifiation")
         for claim in checkworthy_claims:
             st.markdown(f"**Claim**: {claim.strip()}")
-            
-            with st.spinner(f'Retrieving the evidences...'):
+
+            with st.spinner("Retrieving the evidences..."):
                 claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
                 evidence_candidates = []
                 for hit in search_documents(
@@ -116,7 +116,7 @@ def main(args: argparse.Namespace) -> None:
                         )
                 evidences = sorted(evidence_candidates, key=lambda x: x["score"], reverse=True)[: args.num_evidences]
 
-            with st.spinner(f'Retrieving the meta information of the evidences...'):
+            with st.spinner("Retrieving the meta information of the evidences..."):
                 for evidence in evidences:
                     evidence_token_ids = tokenizer.encode(evidence["passage"], add_special_tokens=False)
                     hits = search_documents(
@@ -134,14 +134,14 @@ def main(args: argparse.Namespace) -> None:
                 with st.expander(f"Evidence {i}"):
                     st.markdown(f"Dataset: {evidence['dataset']}")
                     st.markdown(f"Training Step: {evidence['training_step']}")
-                    st.markdown(f"Meta information:")
+                    st.markdown("Meta information:")
                     st.markdown("\n".join(f"- {k}: {v}" for k, v in evidence["meta"].items()))
                     st.markdown(evidence["passage"])
                     st.markdown("---")
 
             with st.spinner("Verifying the check-worthy claims..."):
                 result = verify_claim(claim, [e["passage"] for e in evidences], args.engine)
-            
+
             st.markdown(f"**Result**: {'Supported' if result['label'] else 'Not Supported'}")
             st.markdown(f"**Rationale**: {result['rationale']}")
             st.markdown("--")

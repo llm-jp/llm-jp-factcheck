@@ -35,7 +35,7 @@ SYSTEM_PROMPT = dedent(
                 "claims": ["アメリカの初代大統領はジョージ・ワシントンです。"]
             }
         Note:
-            The claims should be in the same language as the document.     
+            The claims should be in the same language as the document.
     """
 )
 
@@ -176,7 +176,7 @@ if __name__ == "__main__":
             2. The US has some of the most creative restaurants.
             3. Growing tourism industry.
             """
-        )
+        ),
     ]
 
     for document in documents:
