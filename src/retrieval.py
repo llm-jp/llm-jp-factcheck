@@ -73,8 +73,16 @@ def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
         passage = f"passage: {passage}"
 
         with torch.no_grad():
-            query_embedding = model(**tokenizer(query, return_tensors="pt")).last_hidden_state[0].mean(dim=0)
-            passage_embedding = model(**tokenizer(passage, return_tensors="pt")).last_hidden_state[0].mean(dim=0)
+            query_embedding = (
+                model(**tokenizer(query, return_tensors="pt", truncation=True, max_length=tokenizer.model_max_length))
+                .last_hidden_state[0]
+                .mean(dim=0)
+            )
+            passage_embedding = (
+                model(**tokenizer(passage, return_tensors="pt", truncation=True, max_length=tokenizer.model_max_length))
+                .last_hidden_state[0]
+                .mean(dim=0)
+            )
 
         return torch.cosine_similarity(query_embedding, passage_embedding, dim=0).item()
 
