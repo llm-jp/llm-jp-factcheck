@@ -2,7 +2,4 @@ openai
 python-dotenv
 elasticsearch
 transformers
-torch
-accelerate
-langchain
 streamlit
