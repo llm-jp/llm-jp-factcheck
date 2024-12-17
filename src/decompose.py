@@ -12,7 +12,7 @@ SYSTEM_PROMPT = dedent(
     You are provided with a document (or an utterance), which may include optional context.
     Your task is to decompose the document into individual, atomic claims.
     Each claim should represent a single fact and must be comprehensible on its own, without the need for additional context.
-    For instance, replace pronouns with the specific names they refer to when formulating each claim.
+    For instance, pronouns should be replaced with the specific names they refer to when formulating each claim.
 
     Example:
         Input:
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     for document in documents:
         try:
             for i, claim in enumerate(decompose_document_into_claims(document, model=model)):
-                print(f"- {i}. {claim}")
+                print(f"{i}. {claim}")
             print("---")
         except Exception as e:
             print(f"Error: {e}")
