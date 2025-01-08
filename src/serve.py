@@ -26,7 +26,7 @@ class Claim:
     def render(self) -> None:
         st.write(f"#### Claim {self.claim_id}")
 
-        st.code(self.claim)
+        st.code(self.claim, wrap_lines=True, language=None)
 
         if self.is_checkworthy is not None:
             if self.is_checkworthy:
@@ -42,7 +42,7 @@ class Claim:
                     st.caption(
                         f"Dataset: {evidence['dataset']} | Training Step: {evidence['training_step']}"
                     )
-                    st.code(evidence["passage"], wrap_lines=True)
+                    st.code(evidence["passage"], wrap_lines=True, language=None)
 
         if self.is_veridied is not None:
             assert self.rationale is not None
@@ -215,73 +215,6 @@ def main(args: argparse.Namespace) -> None:
                 with analysis_placeholder.container():
                     for claim in claims:
                         claim.render()
-
-        #     st.subheader("Result of verifiation")
-        #     for claim in checkworthy_claims:
-        #         st.markdown(f"**Claim**: {claim.strip()}")
-
-        #         with st.spinner("Retrieving the evidences..."):
-        #             claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
-        #             evidences = []
-        #             hits = search_documents(
-        #                 es,
-        #                 args.es_dump_index,
-        #                 body={
-        #                     "query": {
-        #                         "match": {
-        #                             "token_ids": " ".join(map(str, claim_token_ids))
-        #                         }
-        #                     },
-        #                 },
-        #                 size=args.num_evidences,
-        #                 max_concurrent_shard_requests=64,
-        #             )
-        #             for hit in hits:
-        #                 passage_token_ids = list(
-        #                     map(int, hit["_source"]["token_ids"].split())
-        #                 )
-        #                 passage = tokenizer.decode(passage_token_ids).strip()
-        #                 dataset = hit["_source"]["dataset_name"]
-        #                 training_step = hit["_source"]["iteration"]
-        #                 raw_corpus_path = hit["_source"]["raw_corpus_path"]
-        #                 # TODO: Fix hard-coded prefix
-        #                 raw_corpus_path = raw_corpus_path.replace(
-        #                     "home/shared/corpus/llm-jp-corpus/", ""
-        #                 )
-        #                 raw_corpus_path = raw_corpus_path.replace(
-        #                     "training_resharded_tokenize_ver3.0/", ""
-        #                 )
-        #                 raw_corpus_path = raw_corpus_path.lstrip("/")
-        #                 raw_corpus_idx = hit["_source"]["raw_corpus_idx"]
-        #                 evidences.append(
-        #                     {
-        #                         "passage": passage,
-        #                         "dataset": dataset,
-        #                         "training_step": training_step,
-        #                         "raw_corpus_path": raw_corpus_path,
-        #                         "raw_corpus_idx": raw_corpus_idx,
-        #                     }
-        #                 )
-
-        #         # TODO: Trace meta data
-
-        #         for i, evidence in enumerate(evidences, 1):
-        #             with st.expander(f"Evidence {i}"):
-        #                 st.markdown(f"Dataset: {evidence['dataset']}")
-        #                 st.markdown(f"Training Step: {evidence['training_step']:,}")
-        #                 st.markdown(evidence["passage"])
-        #                 st.markdown("---")
-
-        #         with st.spinner("Verifying the check-worthy claims..."):
-        #             result = verify_claim(
-        #                 claim, [e["passage"] for e in evidences], args.engine
-        #             )
-
-        #         st.markdown(
-        #             f"**Result**: {'Supported' if result['label'] else 'Not Supported'}"
-        #         )
-        #         st.markdown(f"**Rationale**: {result['rationale']}")
-        #         st.markdown("--")
 
 
 if __name__ == "__main__":
