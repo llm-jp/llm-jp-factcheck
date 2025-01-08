@@ -47,10 +47,13 @@ class Claim:
         if self.is_veridied is not None:
             assert self.rationale is not None
             if self.is_veridied:
-                st.write("**Verification result**: :green[Supported]")
+                st.write(
+                    f"**Verification result**: :green[Supported] (Rationale: {self.rationale})"
+                )
             else:
-                st.write("**Verification result**: :red[Not Supported]")
-            st.write(f"**Rationale**: {self.rationale}")
+                st.write(
+                    f"**Verification result**: :red[Not Supported] (Rationale: {self.rationale})"
+                )
 
 
 def parse_args() -> argparse.Namespace:
