@@ -175,6 +175,12 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Streamlit
+.streamlit/
+!e2e_playwright/.streamlit/
+lib/streamlit/static
+streamlit-storage
+
 # Data
 figure/
 result/
