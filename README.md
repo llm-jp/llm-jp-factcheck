@@ -7,6 +7,8 @@
 ## Installation
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -15,8 +17,8 @@ pip install -r requirements.txt
 Create a `.env` file in the root directory with the following content:
 
 ```
-AZURE_OPENAI_API_KEY="xxx"
 AZURE_OPENAI_ENDPOINT="https://xxx.openai.azure.com"
+AZURE_OPENAI_API_KEY="xxx"
 AZURE_OPENAI_API_VERSION="2023-05-15"
 ```
 
