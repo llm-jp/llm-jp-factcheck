@@ -5,6 +5,7 @@ import hmac
 from typing import Optional
 
 import streamlit as st
+import openai
 from checkworthy import identify_checkworthiness
 from decompose import decompose_document_into_claims
 from retrieval import create_elasticsearch_client, search_documents
@@ -24,7 +25,7 @@ class Claim:
     rationale: Optional[str] = None
 
     def render(self) -> None:
-        st.write(f"#### Claim {self.claim_id}")
+        st.write(f"### Claim {self.claim_id}")
 
         st.code(self.claim, wrap_lines=True, language=None)
 
@@ -63,6 +64,14 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: The parsed arguments.
     """
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--chatbot-endpoint", type=str, default="http://localhost:24681/v1"
+    )
+    parser.add_argument(
+        "--chatbot-model-name",
+        type=str,
+        default="/data/shared/llm-jp-3-172b-instruct3/",
+    )
     parser.add_argument("--engine", type=str, default="gpt-4-0613")
     parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-3-13b")
     parser.add_argument("--es_host", type=str, default="http://10.2.73.12:9200")
@@ -115,51 +124,57 @@ def main(args: argparse.Namespace) -> None:
     if check_password() is False:
         st.stop()
 
-    st.title("LLM-jp Fact-Check")
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    with st.form("form", clear_on_submit=False):
-        st.write(
-            "Enter the document (and the context if applicable) you want to fact-check."
-        )
-        context = st.text_area("Context")
-        document = st.text_area("Model output")
-        submitted = st.form_submit_button("Submit")
+    @st.cache_resource
+    def _get_tokenizer(tokenizer_name_or_path: str):
+        return AutoTokenizer.from_pretrained(tokenizer_name_or_path)
 
-    if submitted and document.strip() != "":
-        st.subheader("Fact-Check Results")
+    @st.cache_resource
+    def _create_elasticsearch_client(host: str):
+        return create_elasticsearch_client(host)
+
+    @st.cache_resource
+    def _create_chatbot_client(endpoint: str, api_key: str = "EMPTY"):
+        return openai.OpenAI(base_url=endpoint, api_key=api_key)
+
+    @st.dialog("Fact-check", width="large")
+    def factcheck():
+        response = st.session_state.messages[-1]["content"]
+        context = ""
+        for m in st.session_state.messages[:-1]:
+            context += f"{m['role']}: {m['content']}\n"
+        claims = []
+
         analysis_placeholder = st.empty()
-        with st.spinner("Decomposing the document into atomic claims..."):
-            claims = []
+
+        def render():
+            with analysis_placeholder.container():
+                st.write("### Response")
+                st.code(response, wrap_lines=True, language=None)
+                for claim in claims:
+                    claim.render()
+
+        render()
+
+        with st.spinner("Decomposing the response into atomic claims..."):
             for i, claim in enumerate(
                 decompose_document_into_claims(
-                    document=document,
+                    document=response,
                     context=context,
                     model=args.engine,
                 ),
                 1,
             ):
                 claims.append(Claim(claim_id=i, claim=claim))
-
-        with analysis_placeholder.container():
-            for claim in claims:
-                claim.render()
+            render()
 
         with st.spinner("Identifying check-worthy claims..."):
             checkworthy_labels = identify_checkworthiness(claims, args.engine)
             for claim, is_checkworthy in zip(claims, checkworthy_labels):
                 claim.is_checkworthy = is_checkworthy
-
-        with analysis_placeholder.container():
-            for claim in claims:
-                claim.render()
-
-        @st.cache_resource
-        def _get_tokenizer(tokenizer_name_or_path: str):
-            return AutoTokenizer.from_pretrained(tokenizer_name_or_path)
-
-        @st.cache_resource
-        def _create_elasticsearch_client(host: str):
-            return create_elasticsearch_client(host)
+            render()
 
         tokenizer = _get_tokenizer(args.tokenizer_name)
         es = _create_elasticsearch_client(args.es_host)
@@ -199,10 +214,7 @@ def main(args: argparse.Namespace) -> None:
                         }
                     )
                 claim.evidences = evidences
-
-                with analysis_placeholder.container():
-                    for claim in claims:
-                        claim.render()
+                render()
 
         with st.spinner("Verifying the check-worthy claims..."):
             for claim in claims:
@@ -214,10 +226,38 @@ def main(args: argparse.Namespace) -> None:
                 )
                 claim.is_veridied = result["label"]
                 claim.rationale = result["rationale"]
+                render()
 
-                with analysis_placeholder.container():
-                    for claim in claims:
-                        claim.render()
+    with st.sidebar:
+        st.title("LLM-jp Fact-Check")
+        if st.button(":pencil: New conversation"):
+            st.session_state.messages = []
+
+    chatbot_client = _create_chatbot_client(args.chatbot_endpoint)
+
+    for i, message in enumerate(st.session_state.messages):
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            if i == len(st.session_state.messages) - 1:
+                st.button(":mag: Fact-check", on_click=factcheck)
+
+    if prompt := st.chat_input("Input your message"):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant"):
+            stream = chatbot_client.chat.completions.create(
+                model=args.chatbot_model_name,
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ],
+                stream=True,
+            )
+            response = st.write_stream(stream)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun()
 
 
 if __name__ == "__main__":
