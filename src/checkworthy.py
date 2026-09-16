@@ -15,35 +15,32 @@ RESPONSE_FORMAT = {
     "json_schema": {
         "name": "checkworthiness",
         "strict": True,
-        "description": "Decide whether each claim should be fact-checked, preserving input order.",
+        "description": "Decide whether one claim should be fact-checked.",
         "schema": {
             "type": "object",
             "properties": {
-                "labels": {
-                    "type": "array",
-                    "description": "One boolean per claim: true if check-worthy, false otherwise.",
-                    "items": {"type": "boolean"},
+                "label": {
+                    "type": "boolean",
+                    "description": "True if this claim is check-worthy, false otherwise.",
                 },
             },
-            "required": ["labels"],
+            "required": ["label"],
             "additionalProperties": False,
         },
     },
 }
 
 
-def identify_checkworthiness(claims: list[str], model: str, *, prompt_path: str | Path | None = None) -> list[bool]:
-    """Return one check-worthiness label per claim through the Factchecker connection."""
-    if not isinstance(claims, list):
-        raise TypeError("claims must be a list of nonempty strings.")
-    if any(not isinstance(claim, str) or not claim.strip() for claim in claims):
-        raise ValueError("claims must contain only nonempty strings.")
-    if not claims:
-        return []
+def identify_checkworthiness(claim: str, model: str, *, prompt_path: str | Path | None = None) -> bool:
+    """Judge one claim independently through the Factchecker connection."""
+    if not isinstance(claim, str):
+        raise TypeError("claim must be a string.")
+    if not claim.strip():
+        raise ValueError("claim must be a nonempty string.")
     messages = render_prompt(
         DEFAULT_PROMPT_PATH if prompt_path is None else prompt_path,
-        {"claims": "\n".join(f"- {claim}" for claim in claims)},
-        {"claims"},
+        {"claim": claim},
+        {"claim"},
     )
     response = get_client("factchecker").chat.completions.create(
         model=model,
@@ -51,11 +48,9 @@ def identify_checkworthiness(claims: list[str], model: str, *, prompt_path: str 
         response_format=RESPONSE_FORMAT,
     )
     payload = parse_json_response(response)
-    if set(payload) != {"labels"}:
-        raise ValueError("Check-worthiness response must contain exactly 'labels'.")
-    labels = payload["labels"]
-    if not isinstance(labels, list) or any(not isinstance(label, bool) for label in labels):
-        raise ValueError("Check-worthiness response 'labels' must be a list of booleans.")
-    if len(labels) != len(claims):
-        raise ValueError(f"Expected {len(claims)} check-worthiness labels, but got {len(labels)}.")
-    return labels
+    if set(payload) != {"label"}:
+        raise ValueError("Check-worthiness response must contain exactly 'label'.")
+    label = payload["label"]
+    if not isinstance(label, bool):
+        raise ValueError("Check-worthiness response 'label' must be a boolean.")
+    return label

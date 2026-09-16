@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Iterator
 
+from batching import request_batch
 from checkworthy import identify_checkworthiness
 from decompose import decompose_document_into_claims
 from retrieval import create_elasticsearch_client, search_documents
@@ -14,11 +15,12 @@ from verify import verify_claim
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    engine: str = "gpt-4-0613"
+    engine: str = "gpt-5.4-2026-03-05"
     tokenizer_name: str = "llm-jp/llm-jp-3-13b"
     es_host: str = "http://localhost:9200"
     es_dump_index: str = "llm-jp-corpus-v3"
     num_evidences: int = 1
+    max_concurrency: int = 8
     decomposition_prompt: str | None = None
     checkworthiness_prompt: str | None = None
     verification_prompt: str | None = None
@@ -26,6 +28,8 @@ class PipelineConfig:
     def __post_init__(self) -> None:
         if self.num_evidences < 1:
             raise ValueError("num_evidences must be at least 1.")
+        if self.max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1.")
 
 
 @dataclass
@@ -74,9 +78,18 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
         yield PipelineEvent("complete", "No claims found.", claims=[])
         return
 
-    yield PipelineEvent("checkworthiness", "Identifying check-worthy claims…", total_claims=total)
-    labels = identify_checkworthiness(claims, model=config.engine, prompt_path=config.checkworthiness_prompt)
-    yield PipelineEvent("checkworthiness", f"Check-worthy claims: {sum(labels)} / {total}.", total_claims=total)
+    yield PipelineEvent("checkworthiness", f"Assessing check-worthiness: 0 / {total} claims…", total_claims=total)
+    requests = [
+        partial(identify_checkworthiness, claim, model=config.engine, prompt_path=config.checkworthiness_prompt)
+        for claim in claims
+    ]
+    labels = []
+    with request_batch(requests, config.max_concurrency) as futures:
+        for index, future in enumerate(futures, 1):
+            labels.append(future.result())
+            yield PipelineEvent(
+                "checkworthiness", f"Check-worthiness assessed: {index} / {total} claims.", index, total
+            )
     if any(labels):
         yield PipelineEvent(
             "preparation",
@@ -87,60 +100,81 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
         yield PipelineEvent("preparation", "Connecting to the evidence database…", total_claims=total)
         es = get_search_client(config.es_host)
 
-    for index, (claim, is_checkworthy) in enumerate(zip(claims, labels, strict=True), 1):
-        prefix = f"Claim {index} / {total}"
-        if not is_checkworthy:
-            yield PipelineEvent(
-                "claim_complete",
-                f"{prefix}: not check-worthy; retrieval and verification skipped.",
-                index,
-                total,
-                result={"claim": claim, "is_checkworthy": False, "evidences": [], "no_evidence": False},
-            )
-            continue
-        yield PipelineEvent("retrieval", f"{prefix}: searching for evidence…", index, total)
-        claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
-        hits = search_documents(
-            es,
-            config.es_dump_index,
-            body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
-            size=config.num_evidences,
-            max_concurrent_shard_requests=64,
+    results = [
+        {"claim": claim, "is_checkworthy": label, "evidences": [], "no_evidence": False}
+        for claim, label in zip(claims, labels, strict=True)
+    ]
+    search_targets = [(index, result) for index, result in enumerate(results, 1) if result["is_checkworthy"]]
+    if search_targets:
+        yield PipelineEvent(
+            "retrieval", f"Searching for evidence: 0 / {len(search_targets)} claims…", total_claims=total
         )
-        evidences = []
-        for hit in hits:
-            source = hit["_source"]
-            passage = tokenizer.decode(list(map(int, source["token_ids"].split()))).strip()
-            if passage:
-                evidences.append(
-                    {
-                        "passage": passage,
-                        "dataset": source.get("dataset_name", ""),
-                        "training_step": source.get("iteration"),
-                    }
+        requests = []
+        # Keep tokenizer operations on the calling thread; workers only perform searches.
+        for _, result in search_targets:
+            claim_token_ids = tokenizer.encode(result["claim"], add_special_tokens=False)
+            requests.append(
+                partial(
+                    search_documents,
+                    es,
+                    config.es_dump_index,
+                    body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
+                    size=config.num_evidences,
+                    max_concurrent_shard_requests=64,
+                )
+            )
+        with request_batch(requests, config.max_concurrency) as futures:
+            for completed, ((index, result), future) in enumerate(zip(search_targets, futures, strict=True), 1):
+                evidences = []
+                for hit in future.result():
+                    source = hit["_source"]
+                    passage = tokenizer.decode(list(map(int, source["token_ids"].split()))).strip()
+                    if passage:
+                        evidences.append(
+                            {
+                                "passage": passage,
+                                "dataset": source.get("dataset_name", ""),
+                                "training_step": source.get("iteration"),
+                            }
+                        )
+                result["evidences"] = evidences
+                result["no_evidence"] = not evidences
+                yield PipelineEvent(
+                    "retrieval",
+                    f"Evidence searches completed: {completed} / {len(search_targets)} claims.",
+                    index,
+                    total,
                 )
 
-        for evidence_index, evidence in enumerate(evidences, 1):
-            yield PipelineEvent(
-                "verification",
-                f"{prefix}: verifying against evidence {evidence_index} / {len(evidences)}…",
-                index,
-                total,
-            )
-            evidence["verification"] = verify_claim(
-                claim,
-                evidence["passage"],
-                model=config.engine,
-                prompt_path=config.verification_prompt,
-            )
-
-        result = {"claim": claim, "is_checkworthy": True, "evidences": evidences, "no_evidence": not evidences}
-        yield PipelineEvent(
-            "claim_complete",
-            f"{prefix}: verification complete." if evidences else f"{prefix}: no evidence found.",
-            index,
-            total,
-            result=result,
+    requests = [
+        partial(
+            verify_claim,
+            result["claim"],
+            evidence["passage"],
+            model=config.engine,
+            prompt_path=config.verification_prompt,
         )
+        for result in results
+        for evidence in result["evidences"]
+    ]
+    if requests:
+        yield PipelineEvent("verification", f"Verifying claim–evidence pairs: 0 / {len(requests)}…", total_claims=total)
+    with request_batch(requests, config.max_concurrency) as futures:
+        pending = iter(futures)
+        completed_pairs = 0
+        for index, result in enumerate(results, 1):
+            for evidence in result["evidences"]:
+                evidence["verification"] = next(pending).result()
+                completed_pairs += 1
+                yield PipelineEvent(
+                    "verification", f"Verified claim–evidence pairs: {completed_pairs} / {len(requests)}.", index, total
+                )
+            if not result["is_checkworthy"]:
+                message = "not check-worthy; retrieval and verification skipped."
+            elif result["no_evidence"]:
+                message = "no evidence found."
+            else:
+                message = "verification complete."
+            yield PipelineEvent("claim_complete", f"Claim {index} / {total}: {message}", index, total, result=result)
 
     yield PipelineEvent("complete", f"Fact-check complete. Claims processed: {total}.", total, total)

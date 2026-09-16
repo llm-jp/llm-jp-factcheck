@@ -77,12 +77,12 @@ Model selection uses the following precedence:
 
 | Role | Highest to lowest priority |
 | --- | --- |
-| Fact-checker | `--engine`, then `FACTCHECKER_MODEL`, then `gpt-4-0613` |
+| Fact-checker | `--engine`, then `FACTCHECKER_MODEL`, then `gpt-5.4-2026-03-05` |
 | Chatbot | `--chat-engine`, then `CHATBOT_MODEL`, then the resolved fact-checker model |
 
 The app loads the project-root `.env` without overriding existing process environment variables. Blank or whitespace-only model variables count as unset. Use model IDs accepted by the endpoint in `openai` mode and deployment names in `azure` mode. Azure v1 endpoints also expect deployment names.
 
-Set `FACTCHECKER_MODEL` or `--engine` to a model or deployment that supports Structured Outputs. The historical fallback name `gpt-4-0613` is retained for existing deployment configurations; the OpenAI model of that name does not support this output format.
+The default Factchecker model is [`gpt-5.4-2026-03-05`](https://developers.openai.com/api/docs/models/gpt-5.4). Override it with `FACTCHECKER_MODEL` or `--engine`. For Azure, use your deployment name, which may differ from the model ID.
 
 Override model settings and supply retrieval options on the command line:
 
@@ -93,7 +93,8 @@ uv run --locked streamlit run src/serve.py -- \
   --es_host http://10.2.73.12:9200 \
   --es_dump_index llm-jp-corpus-v3 \
   --tokenizer_name llm-jp/llm-jp-3-13b \
-  --num_evidences 3
+  --num_evidences 3 \
+  --max-concurrency 8
 ```
 
 ## Mock mode
@@ -106,9 +107,9 @@ uv run --locked streamlit run src/serve.py -- --mock
 
 `--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all five verdict labels, a non-check-worthy claim that is skipped, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
 
-Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and seven seconds per fact-check with the default evidence count, excluding UI overhead. Adjust the delay constants in `src/mock_backend.py` to change these timings.
+Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and three seconds per fact-check with the default evidence count and concurrency, excluding UI overhead. Mock check-worthiness, retrieval, and verification use the same bounded parallel execution as live requests. Adjust the delay constants in `src/mock_backend.py` to change these timings.
 
-Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings, except `--num_evidences`, which selects up to two available synthetic evidence passages per claim. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
+Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings. `--num_evidences` selects up to two available synthetic evidence passages per claim, and `--max-concurrency` limits simultaneous mock tasks. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
 
 ## Workflow
 
@@ -118,7 +119,9 @@ Results remain associated with their response as the conversation continues. Cla
 
 The first fact-check starts immediately. Checking the same response again shows an inline confirmation: **Run again** replaces its existing results, while **Cancel** keeps them. The progress indicator disappears when the run ends. Expand **Evidence passage** to read a passage and **Source details** to see its source name and training step.
 
-After decomposition, the Factchecker model identifies check-worthy claims in one batch, following the `v3.0` workflow. Non-check-worthy claims remain visible with a skipped message and receive no verification verdict. If every claim is skipped, neither the tokenizer nor Elasticsearch is initialized. For each check-worthy claim, the app retrieves evidence passages in Elasticsearch result order, then verifies each claim–evidence pair independently. When retrieval returns no usable evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call. API and retrieval failures are reported as errors rather than verdicts.
+After decomposition, the Factchecker model assesses each claim independently in its own check-worthiness request. These requests run concurrently. Non-check-worthy claims remain visible with a skipped message and receive no verification verdict. If every claim is skipped, neither the tokenizer nor Elasticsearch is initialized. The app searches Elasticsearch concurrently for all check-worthy claims, then submits the individual claim–evidence verification requests concurrently across all claims. Tokenization and decoding happen on the calling thread. Results retain the original claim order and Elasticsearch evidence order. When retrieval returns no usable evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call.
+
+`--max-concurrency` (default: `8`) limits simultaneous HTTP requests in each of the check-worthiness, Elasticsearch retrieval, and verification stages; use `1` for sequential execution. These are parallel requests to Chat Completions and Elasticsearch, not asynchronous OpenAI Batch API jobs. Progress messages report completed claims, searches, or pairs as results are collected in input order. API and retrieval failures are reported as errors rather than verdicts. Completed claim results remain visible; queued work is cancelled on failure and already-running requests are allowed to finish.
 
 ## Replace prompts
 
@@ -127,10 +130,10 @@ Prompts are UTF-8 JSON files containing `system` and `user` strings. Edit these 
 | Task | Default file | Required placeholders | Optional placeholders |
 | --- | --- | --- | --- |
 | Decomposition | `prompts/decomposition.json` | `{{document}}` | `{{context}}` |
-| Check-worthiness | `prompts/checkworthiness.json` | `{{claims}}` | None |
+| Check-worthiness | `prompts/checkworthiness.json` | `{{claim}}` | None |
 | Verification | `prompts/verification.json` | `{{claim}}`, `{{evidence}}` | None |
 
-The check-worthiness template receives all extracted claims as a bulleted list in `{{claims}}`. Edit its `system` and `user` strings to change selection criteria or examples; files are reread on every call. The bundled template follows `v3.0`, with its subjective-opinion example corrected to `false` to match the stated criteria.
+The check-worthiness template receives one claim in `{{claim}}`. Edit its `system` and `user` strings to change selection criteria or examples; files are reread on every call. Existing custom check-worthiness templates must replace `{{claims}}` with `{{claim}}` and request a single boolean `label`. The bundled criteria follow `v3.0`, with its subjective-opinion example corrected to `false` to match the stated criteria.
 
 For example, a minimal decomposition prompt is:
 
@@ -164,12 +167,12 @@ claims = decompose_document_into_claims(
     model="your-factcheck-model-or-deployment",
     prompt_path="prompts/decomposition.json",
 )
-labels = identify_checkworthiness(
-    claims,
-    model="your-factcheck-model-or-deployment",
-    prompt_path="prompts/checkworthiness.json",
-)
-for claim, is_checkworthy in zip(claims, labels, strict=True):
+for claim in claims:
+    is_checkworthy = identify_checkworthiness(
+        claim,
+        model="your-factcheck-model-or-deployment",
+        prompt_path="prompts/checkworthiness.json",
+    )
     if not is_checkworthy:
         continue
     result = verify_claim(
@@ -181,7 +184,7 @@ for claim, is_checkworthy in zip(claims, labels, strict=True):
     # The result contains "label" and "rationale".
 ```
 
-JSON Schemas in Python define the output contract: decomposition returns a list of claim strings, check-worthiness returns one boolean per claim in input order, and verification returns `label` and `rationale`. Application validation also rejects invalid values and a wrong number of check-worthiness labels. Prompt files control instructions and examples independently of these schemas. Custom prompts should request JSON output rather than function calls. Verification accepts exactly five labels:
+JSON Schemas in Python define the output contract: decomposition returns a list of claim strings, check-worthiness reads a single boolean `label` and returns that boolean, and verification returns `label` and `rationale`. Application validation also rejects invalid values. Prompt files control instructions and examples independently of these schemas. Custom prompts should request JSON output rather than function calls. Verification accepts exactly five labels:
 
 - `Supported`
 - `Partially supported`

@@ -120,58 +120,54 @@ class LLMTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify.verify_claim("Claim", "Evidence", "deployment")
 
-    def test_checkworthiness_returns_ordered_labels_using_factchecker(self):
-        mocked, getter = self.mock_client(checkworthy, response({"labels": [False, True]}))
-        claims = ["This film is wonderful.", "The museum opened in 2012."]
-        self.assertEqual(checkworthy.identify_checkworthiness(claims, "deployment"), [False, True])
+    def test_checkworthiness_judges_one_claim_using_factchecker(self):
+        mocked, getter = self.mock_client(checkworthy, response({"label": False}))
+        claim = "This film is wonderful."
+        self.assertIs(checkworthy.identify_checkworthiness(claim, "deployment"), False)
         getter.assert_called_once_with("factchecker")
         kwargs = mocked.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "deployment")
-        self.assertIn("- This film is wonderful.\n- The museum opened in 2012.", kwargs["messages"][1]["content"])
+        self.assertIn(claim, kwargs["messages"][1]["content"])
+        self.assertNotIn("The museum opened in 2012.", kwargs["messages"][1]["content"])
         self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "checkworthiness")
-        self.assertEqual(
-            kwargs["response_format"]["json_schema"]["schema"]["properties"]["labels"]["items"], {"type": "boolean"}
-        )
+        self.assertEqual(kwargs["response_format"]["json_schema"]["schema"]["properties"]["label"]["type"], "boolean")
 
     def test_empty_or_invalid_checkworthiness_inputs_make_no_api_call(self):
         _, getter = self.mock_client(checkworthy, None)
-        self.assertEqual(checkworthy.identify_checkworthiness([], "deployment"), [])
-        for claims in [None, "Claim", ("Claim",)]:
-            with self.subTest(claims=claims), self.assertRaises(TypeError):
-                checkworthy.identify_checkworthiness(claims, "deployment")
-        for claims in [[None], [1], [" "], ["Claim", ""]]:
-            with self.subTest(claims=claims), self.assertRaises(ValueError):
-                checkworthy.identify_checkworthiness(claims, "deployment")
+        for claim in [None, [], ["Claim"], ("Claim",), 1]:
+            with self.subTest(claim=claim), self.assertRaises(TypeError):
+                checkworthy.identify_checkworthiness(claim, "deployment")
+        for claim in ["", " \n "]:
+            with self.subTest(claim=claim), self.assertRaises(ValueError):
+                checkworthy.identify_checkworthiness(claim, "deployment")
         getter.assert_not_called()
 
     def test_invalid_checkworthiness_labels_are_rejected(self):
         mocked, _ = self.mock_client(checkworthy, None)
         for payload in [
             {},
-            {"labels": True},
-            {"labels": ["true", "false"]},
-            {"labels": [1, 0]},
-            {"labels": [True, None]},
-            {"labels": []},
             {"labels": [True]},
-            {"labels": [True, False, True]},
-            {"labels": [True, False], "extra": 1},
+            {"label": "true"},
+            {"label": 1},
+            {"label": None},
+            {"label": []},
+            {"label": True, "extra": 1},
         ]:
             with self.subTest(payload=payload):
                 mocked.chat.completions.create.return_value = response(payload)
                 with self.assertRaises(ValueError):
-                    checkworthy.identify_checkworthiness(["Claim A", "Claim B"], "deployment")
+                    checkworthy.identify_checkworthiness("Claim A", "deployment")
 
     def test_checkworthiness_prompt_can_be_replaced_and_reloads(self):
-        mocked, _ = self.mock_client(checkworthy, response({"labels": [True]}))
+        mocked, _ = self.mock_client(checkworthy, response({"label": True}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.json"
             for instruction in ["First instructions", "Updated instructions"]:
-                path.write_text(json.dumps({"system": instruction, "user": "Claims: {{claims}}"}), encoding="utf-8")
-                checkworthy.identify_checkworthiness(["Literal {{claims}} text"], "deployment", prompt_path=path)
+                path.write_text(json.dumps({"system": instruction, "user": "Claim: {{claim}}"}), encoding="utf-8")
+                checkworthy.identify_checkworthiness("Literal {{claim}} text", "deployment", prompt_path=path)
                 messages = mocked.chat.completions.create.call_args.kwargs["messages"]
                 self.assertEqual(messages[0]["content"], instruction)
-                self.assertEqual(messages[1]["content"], "Claims: - Literal {{claims}} text")
+                self.assertEqual(messages[1]["content"], "Claim: Literal {{claim}} text")
 
     def test_invalid_checkworthiness_prompt_prevents_client_creation(self):
         _, getter = self.mock_client(checkworthy, None)
@@ -179,13 +175,13 @@ class LLMTests(unittest.TestCase):
             path = Path(directory) / "invalid.json"
             path.write_text(json.dumps({"system": "Instructions", "user": "{{document}}"}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unknown placeholders"):
-                checkworthy.identify_checkworthiness(["Claim"], "deployment", prompt_path=path)
+                checkworthy.identify_checkworthiness("Claim", "deployment", prompt_path=path)
         getter.assert_not_called()
 
     def test_malformed_json_responses_fail_clearly_for_all_operations(self):
         cases = [
             (decompose, lambda: decompose.decompose_document_into_claims("Text", "deployment")),
-            (checkworthy, lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment")),
+            (checkworthy, lambda: checkworthy.identify_checkworthiness("Claim", "deployment")),
             (verify, lambda: verify.verify_claim("Claim", "Evidence", "deployment")),
         ]
         for module, invoke in cases:
@@ -211,7 +207,7 @@ class LLMTests(unittest.TestCase):
     def test_refusals_partial_outputs_and_tool_calls_are_rejected(self):
         cases = [
             (decompose, {"claims": ["Claim"]}, lambda: decompose.decompose_document_into_claims("Text", "deployment")),
-            (checkworthy, {"labels": [True]}, lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment")),
+            (checkworthy, {"label": True}, lambda: checkworthy.identify_checkworthiness("Claim", "deployment")),
             (
                 verify,
                 {"label": "Supported", "rationale": "Reason"},
@@ -244,8 +240,8 @@ class LLMTests(unittest.TestCase):
             (
                 checkworthy,
                 "checkworthiness",
-                {"labels": [True]},
-                lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment"),
+                {"label": True},
+                lambda: checkworthy.identify_checkworthiness("Claim", "deployment"),
             ),
             (
                 verify,

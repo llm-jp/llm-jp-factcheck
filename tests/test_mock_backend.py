@@ -128,20 +128,20 @@ class MockBackendTests(unittest.TestCase):
         self.assertEqual(remaining[-1].current_claim, 6)
         self.assertEqual(remaining[-1].total_claims, 6)
         self.assertIn("checkworthiness", [event.stage for event in remaining])
-        self.assertEqual(sum(event.stage == "verification" for event in remaining), 10)
+        self.assertEqual(sum(event.stage == "verification" and event.current_claim > 0 for event in remaining), 10)
         for index in range(1, 6):
             stages = [event.stage for event in remaining if event.current_claim == index and event.stage != "complete"]
-            self.assertEqual(stages, ["retrieval", "verification", "verification", "claim_complete"])
+            self.assertEqual(stages, ["checkworthiness", "retrieval", "verification", "verification", "claim_complete"])
         self.assertEqual(
             [event.stage for event in remaining if event.current_claim == 6 and event.stage != "complete"],
-            ["claim_complete"],
+            ["checkworthiness", "claim_complete"],
         )
 
     def test_only_non_checkworthy_sample_skips_retrieval(self):
         events = list(mock_backend.run_mock_factcheck(mock_backend.MOCK_CLAIMS[-1], None, PipelineConfig()))
         self.assertEqual(
             [event.stage for event in events],
-            ["decomposition", "decomposition", "checkworthiness", "claim_complete", "complete"],
+            ["decomposition", "decomposition", "checkworthiness", "checkworthiness", "claim_complete", "complete"],
         )
         result = next(event.result for event in events if event.result is not None)
         self.assertFalse(result["is_checkworthy"])

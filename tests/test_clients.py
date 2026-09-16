@@ -77,7 +77,7 @@ class ClientTests(unittest.TestCase):
         if schema_name:
             payloads = {
                 "decomposition": {"claims": ["Kyoto is in Japan."]},
-                "checkworthiness": {"labels": [True]},
+                "checkworthiness": {"label": True},
                 "verification": {"label": "Supported", "rationale": "The evidence states the claim."},
             }
             message["content"] = json.dumps(payloads[schema_name])
@@ -147,11 +147,11 @@ class ClientTests(unittest.TestCase):
                     chat.stream_chat_response([{"role": "user", "content": "Where is Kyoto?"}], "chat-model")
                 )
                 claims = decompose.decompose_document_into_claims(answer, "check-model")
-                labels = checkworthy.identify_checkworthiness(claims, "check-model")
+                label = checkworthy.identify_checkworthiness(claims[0], "check-model")
                 verdict = verify.verify_claim(claims[0], "Kyoto is in Japan.", "check-model")
                 self.assertEqual(answer, "Kyoto is in Japan.")
                 self.assertEqual(claims, [answer])
-                self.assertEqual(labels, [True])
+                self.assertIs(label, True)
                 self.assertEqual(verdict["label"], "Supported")
                 self.assertEqual(len(self.requests), 4)
                 self.assert_route(self.requests[0], "chatbot", "openai", "chat-model")

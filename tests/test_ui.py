@@ -631,12 +631,15 @@ class ChatUITest(unittest.TestCase):
                 "verify.json",
                 "--chat-engine",
                 "chat-model",
+                "--max-concurrency",
+                "3",
             ]
         )
         self.assertEqual(args.decomposition_prompt, "decompose.json")
         self.assertEqual(args.checkworthiness_prompt, "checkworthy.json")
         self.assertEqual(args.verification_prompt, "verify.json")
         self.assertEqual(args.chat_engine, "chat-model")
+        self.assertEqual(args.max_concurrency, 3)
         with self.assertRaises(argparse.ArgumentTypeError):
             module.positive_integer("0")
         with self.assertRaises(argparse.ArgumentTypeError):
@@ -654,7 +657,7 @@ class ChatUITest(unittest.TestCase):
                 "process-factchecker",
                 "process-chatbot",
             ),
-            ({"FACTCHECKER_MODEL": " \t ", "CHATBOT_MODEL": ""}, "gpt-4-0613", None),
+            ({"FACTCHECKER_MODEL": " \t ", "CHATBOT_MODEL": ""}, "gpt-5.4-2026-03-05", None),
         ]
         with TemporaryDirectory() as directory:
             dotenv_path = Path(directory) / ".env"
@@ -683,7 +686,7 @@ class ChatUITest(unittest.TestCase):
             "ES_DUMP_INDEX": "unused-index",
         }
         cases = [
-            (["--mock"], "gpt-4-0613", None),
+            (["--mock"], "gpt-5.4-2026-03-05", None),
             (["--mock", "--engine", "cli-factchecker"], "cli-factchecker", None),
             (
                 ["--mock", "--engine", "cli-factchecker", "--chat-engine", "cli-chatbot"],
@@ -770,11 +773,11 @@ class ChatUITest(unittest.TestCase):
     def test_chat_model_selection_does_not_change_factchecker_model(self):
         environment = {"FACTCHECKER_MODEL": " env-factchecker ", "CHATBOT_MODEL": " env-chatbot "}
         cases = [
-            ([], {}, "gpt-4-0613", "gpt-4-0613"),
+            ([], {}, "gpt-5.4-2026-03-05", "gpt-5.4-2026-03-05"),
             (["--engine", "cli-factchecker"], {}, "cli-factchecker", "cli-factchecker"),
             ([], environment, "env-factchecker", "env-chatbot"),
             ([], {"FACTCHECKER_MODEL": "env-factchecker"}, "env-factchecker", "env-factchecker"),
-            ([], {"CHATBOT_MODEL": "env-chatbot"}, "gpt-4-0613", "env-chatbot"),
+            ([], {"CHATBOT_MODEL": "env-chatbot"}, "gpt-5.4-2026-03-05", "env-chatbot"),
             (["--engine", "cli-factchecker"], environment, "cli-factchecker", "env-chatbot"),
             (["--chat-engine", "cli-chatbot"], environment, "env-factchecker", "cli-chatbot"),
             (
