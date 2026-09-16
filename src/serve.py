@@ -1,166 +1,445 @@
+"""Multi-turn chat with independent fact-checks for each model response."""
+
+from __future__ import annotations
+
 import argparse
+import html
 import json
 import logging
+from pathlib import Path
+from uuid import uuid4
 
 import streamlit as st
-from checkworthy import identify_checkworthiness
-from decompose import decompose_document_into_claims
-from retrieval import chunk_document, create_elasticsearch_client, create_relevance_scorer, search_documents
-from transformers import AutoTokenizer
-from verify import verify_claim
+
+from chat import stream_chat_response
+from pipeline import PipelineConfig, run_factcheck
 
 logger = logging.getLogger(__name__)
 
+LABELS = {
+    "Supported": "supported",
+    "Partially supported": "partially-supported",
+    "Partially refuted": "partially-refuted",
+    "Refuted": "refuted",
+    "Not enough information": "nei",
+}
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
 
-    Returns:
-        argparse.Namespace: The parsed arguments.
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--engine", type=str, default="gpt-4-0613")
-    parser.add_argument("--tokenizer_name", type=str, default="llm-jp/llm-jp-13b-v1.0")
-    parser.add_argument("--es_host", type=str, default="http://localhost:9200")
-    parser.add_argument("--es_dump_index", type=str, default="llm-jp-search-v1.0")
-    parser.add_argument("--es_meta_index", type=str, default="llm-jp-search-for-meta-v1.0")
-    parser.add_argument("--num_evidences", type=int, default=1)
-    parser.add_argument("--embedding", type=str, default="intfloat/multilingual-e5-base")
+def positive_integer(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("num_evidences must be greater than zero")
+    return number
 
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Chat with a model and fact-check responses using independent Chatbot and Factchecker connections.",
+        epilog=(
+            "Configure OpenAI-compatible or Azure OpenAI endpoints with CHATBOT_* and FACTCHECKER_* "
+            "environment variables."
+        ),
+    )
+    parser.add_argument(
+        "--engine",
+        default="gpt-4-0613",
+        help="Model name or Azure deployment for the Factchecker; also the default Chatbot model.",
+    )
+    parser.add_argument(
+        "--chat-engine",
+        "--chat_engine",
+        default=None,
+        help="Optional Chatbot model name or Azure deployment (defaults to --engine).",
+    )
+    parser.add_argument("--tokenizer_name", "--tokenizer-name", default="llm-jp/llm-jp-13b-v1.0")
+    parser.add_argument("--es_host", "--es-host", default="http://localhost:9200")
+    parser.add_argument("--es_dump_index", "--es-dump-index", default="llm-jp-search-v1.0")
+    parser.add_argument("--es_meta_index", "--es-meta-index", default="llm-jp-search-for-meta-v1.0")
+    parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=1)
+    parser.add_argument("--embedding", default="intfloat/multilingual-e5-base")
+    parser.add_argument("--decomposition-prompt", "--decomposition_prompt", default=None)
+    parser.add_argument("--verification-prompt", "--verification_prompt", default=None)
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use synthetic chat and fact-check results without API calls, Elasticsearch, or model downloads.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def _text(value: object) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def _badge(label: str) -> str:
+    class_name = LABELS.get(label, "nei")
+    return f'<span class="verdict {class_name}">{_text(label)}</span>'
+
+
+def _render_result(result: dict, index: int) -> None:
+    st.markdown(
+        f'<div class="claim-heading"><span class="eyebrow">Claim {index}</span>'
+        f'<p class="claim-text">{_text(result["claim"])}</p></div>',
+        unsafe_allow_html=True,
+    )
+    if result.get("no_evidence"):
+        with st.container(border=True):
+            st.markdown(_badge("Not enough information"), unsafe_allow_html=True)
+            st.caption("No evidence was retrieved for this claim. No verification call was made.")
+        return
+
+    for evidence_index, evidence in enumerate(result["evidences"], 1):
+        verification = evidence["verification"]
+        with st.container(border=True):
+            st.markdown(f'<div class="eyebrow evidence-number">Evidence {evidence_index}</div>', unsafe_allow_html=True)
+            st.markdown(_badge(verification["label"]), unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="section-label">Rationale</div>'
+                f'<p class="rationale">{_text(verification["rationale"])}</p>',
+                unsafe_allow_html=True,
+            )
+            with st.expander("Evidence passage", expanded=False):
+                st.markdown(
+                    f'<div class="evidence-passage">{_text(evidence["passage"])}</div>',
+                    unsafe_allow_html=True,
+                )
+            with st.expander("Source details"):
+                st.text(f"Source: {evidence.get('dataset') or 'Not available'}")
+                training_step = evidence.get("training_step")
+                st.text(f"Training step: {training_step if training_step is not None else 'Not available'}")
+
+
+def _render_results(run: dict) -> None:
+    claims = run.get("claims", [])
+    results = run.get("results", [])
+    if not claims and not results:
+        if run.get("state") == "complete":
+            st.info("No claims were found in this response.")
+        return
+
+    with st.container(border=True):
+        st.markdown(
+            '<div class="results-header"><h3 class="results-heading">Fact-check results</h3>'
+            f'<span class="results-count">{len(results)} / {len(claims)} claims checked</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Each verdict applies to one claim–evidence pair.")
+        if run.get("mock"):
+            st.caption("Synthetic results for interface testing.")
+        # Keep sections at stable positions while results arrive. Streamlit reuses
+        # nested blocks during a run, so moving expanders can retain unrelated content.
+        with st.container():
+            for index, result in enumerate(results, 1):
+                _render_result(result, index)
+        pending_message = st.empty()
+        if claims and not results and run.get("state") == "running":
+            pending_message.caption("Retrieving evidence. Results will appear as claims are checked.")
+
+
+def _progress(event) -> float:
+    if event.stage == "complete":
+        return 1.0
+    if event.stage == "decomposition":
+        return 0.03
+    if event.stage == "preparation":
+        return 0.12
+    if event.total_claims:
+        fractions = {"retrieval": 0.08, "ranking": 0.25, "metadata": 0.55, "verification": 0.72, "claim_complete": 1.0}
+        completed = max(event.current_claim - 1, 0) + fractions.get(event.stage, 0)
+        return min(0.98, 0.15 + 0.83 * completed / event.total_claims)
+    return 0.15
+
+
+def _run_factcheck(response: dict, preceding_messages: list[dict], args: argparse.Namespace, results_area) -> None:
+    # Snapshot only the conversation preceding this response, including its user prompt.
+    context = json.dumps(
+        [{"role": message["role"], "content": message["content"]} for message in preceding_messages],
+        ensure_ascii=False,
+        indent=2,
+    )
+    run = {
+        "document": response["content"],
+        "context": context,
+        "claims": [],
+        "results": [],
+        "state": "running",
+        "error": None,
+    }
+    factcheck = run_factcheck
+    if args.mock:
+        from mock_backend import run_mock_factcheck
+
+        factcheck = run_mock_factcheck
+        run["mock"] = True
+    st.session_state["factchecks"][response["id"]] = run
+    with st.status("Extracting claims from this response…", expanded=True) as status:
+        progress = st.progress(0.0)
+        message = st.empty()
+        message.caption(
+            "Simulating decomposition, evidence retrieval, and verification with synthetic data."
+            if args.mock
+            else "Decomposition → evidence retrieval → verification. Initial model loading may take some time."
+        )
+        try:
+            config = PipelineConfig(
+                engine=args.engine,
+                tokenizer_name=args.tokenizer_name,
+                es_host=args.es_host,
+                es_dump_index=args.es_dump_index,
+                es_meta_index=args.es_meta_index,
+                num_evidences=args.num_evidences,
+                embedding=args.embedding,
+                decomposition_prompt=args.decomposition_prompt,
+                verification_prompt=args.verification_prompt,
+            )
+            complete = False
+            previous_progress = 0.0
+            for event in factcheck(run["document"], context, config):
+                status.update(label=event.message)
+                message.caption(event.message)
+                previous_progress = max(previous_progress, _progress(event))
+                progress.progress(previous_progress)
+                if event.claims is not None:
+                    run["claims"] = event.claims
+                if event.stage == "claim_complete" and event.result is not None:
+                    run["results"].append(event.result)
+                if event.claims is not None or event.stage == "claim_complete":
+                    with results_area.container():
+                        _render_results(run)
+                if event.stage == "complete":
+                    complete = True
+            if not complete:
+                raise RuntimeError("Fact-checking ended before completion. Please retry.")
+        except Exception as exc:
+            logger.exception("Fact-checking failed")
+            run["state"] = "error"
+            run["error"] = str(exc)
+        else:
+            run["state"] = "complete"
+        finally:
+            progress.empty()
+
+
+def _render_message(message: dict, index: int, args: argparse.Namespace) -> None:
+    with st.chat_message(message["role"]):
+        _render_author(message["role"])
+        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            _render_response_controls(message, index, args)
+
+
+def _render_author(role: str) -> None:
+    name = "You" if role == "user" else "Assistant"
+    st.markdown(f'<div class="message-author">{name}</div>', unsafe_allow_html=True)
+
+
+def _render_response_controls(message: dict, index: int, args: argparse.Namespace) -> None:
+    response_id = message["id"]
+    st.button(
+        "Fact-check response",
+        key=f"factcheck_{response_id}",
+        type="primary",
+        on_click=_request_factcheck,
+        args=(response_id,),
+    )
+    if st.session_state.get("recheck_confirmation") == response_id:
+        with st.container(border=True):
+            st.markdown('<div class="recheck-heading">Run fact-check again?</div>', unsafe_allow_html=True)
+            st.caption("This will replace the existing results for this response.")
+            confirm, cancel = st.columns(2)
+            with confirm:
+                st.button(
+                    "Run again",
+                    key=f"confirm_factcheck_{response_id}",
+                    type="primary",
+                    on_click=_confirm_factcheck,
+                    args=(response_id,),
+                )
+            with cancel:
+                st.button(
+                    "Cancel",
+                    key=f"cancel_factcheck_{response_id}",
+                    on_click=_cancel_factcheck,
+                    args=(response_id,),
+                )
+    activity_area = st.empty()
+    results_area = st.empty()
+    if st.session_state.get("pending_factcheck") == response_id:
+        st.session_state.pop("pending_factcheck")
+        with activity_area.container():
+            _run_factcheck(message, st.session_state["messages"][:index], args, results_area)
+    if response_id in st.session_state["factchecks"]:
+        run = st.session_state["factchecks"][response_id]
+        if run["state"] == "complete":
+            activity_area.caption("Fact-check complete")
+        elif run["state"] == "error":
+            activity_area.error(f"Fact-checking failed: {run['error']}. Completed results have been retained.")
+        else:
+            activity_area.warning("This fact-check was interrupted. Completed results are shown below. You can retry.")
+        with results_area.container():
+            _render_results(run)
+
+
+def _request_factcheck(response_id: str) -> None:
+    """Run an initial check directly; require confirmation for an existing run."""
+    st.session_state.pop("pending_factcheck", None)
+    if response_id in st.session_state["factchecks"]:
+        st.session_state["recheck_confirmation"] = response_id
+    else:
+        st.session_state.pop("recheck_confirmation", None)
+        st.session_state["pending_factcheck"] = response_id
+
+
+def _confirm_factcheck(response_id: str) -> None:
+    if st.session_state.get("recheck_confirmation") == response_id:
+        st.session_state.pop("recheck_confirmation")
+        st.session_state["pending_factcheck"] = response_id
+
+
+def _cancel_factcheck(response_id: str) -> None:
+    if st.session_state.get("recheck_confirmation") == response_id:
+        st.session_state.pop("recheck_confirmation")
+
+
+def _generate_response(args: argparse.Namespace) -> None:
+    history = [{"role": message["role"], "content": message["content"]} for message in st.session_state["messages"]]
+    generate = stream_chat_response
+    if args.mock:
+        from mock_backend import stream_mock_chat_response
+
+        generate = stream_mock_chat_response
+    st.session_state["chat_error"] = None
+    response_area = st.empty()
+    with response_area.container():
+        with st.chat_message("assistant"):
+            _render_author("assistant")
+            output = st.empty()
+            fragments = []
+            try:
+                with st.spinner("Generating response…"):
+                    stream = generate(history, model=args.chat_engine or args.engine)
+                    try:
+                        for fragment in stream:
+                            fragments.append(fragment)
+                            output.markdown("".join(fragments) + " ▌")
+                    finally:
+                        close = getattr(stream, "close", None)
+                        if close is not None:
+                            close()
+                content = "".join(fragments)
+                if not content.strip():
+                    raise ValueError("The model returned an empty response.")
+            except Exception as exc:
+                logger.exception("Response generation failed")
+                st.session_state["chat_error"] = str(exc)
+            else:
+                message = {"id": uuid4().hex, "role": "assistant", "content": content}
+                st.session_state["messages"].append(message)
+                output.markdown(content)
+                _render_response_controls(message, len(st.session_state["messages"]) - 1, args)
+    if st.session_state["chat_error"]:
+        response_area.empty()
+
+
+def _submit_message() -> None:
+    """Consume one input event before rendering; reruns never resend it."""
+    prompt = st.session_state["chat_input"]
+    st.session_state["input_error"] = None
+    if not prompt or not prompt.strip():
+        st.session_state["input_error"] = "Enter a message before sending."
+        return
+    st.session_state["messages"].append({"id": uuid4().hex, "role": "user", "content": prompt})
+    _request_response()
+
+
+def _request_response() -> None:
+    st.session_state["chat_error"] = None
+    st.session_state["pending_response"] = True
+
+
+def _new_chat() -> None:
+    st.session_state["messages"] = []
+    st.session_state["factchecks"] = {}
+    st.session_state["chat_error"] = None
+    st.session_state["input_error"] = None
+    st.session_state.pop("pending_response", None)
+    st.session_state.pop("chat_input", None)
+    st.session_state.pop("pending_factcheck", None)
+    st.session_state.pop("recheck_confirmation", None)
 
 
 def main(args: argparse.Namespace) -> None:
-    """Run the pipeline.
+    st.set_page_config(page_title="LLM-jp Fact-Check", layout="wide", initial_sidebar_state="collapsed")
+    st.markdown(
+        f"<style>{Path(__file__).with_name('styles.css').read_text(encoding='utf-8')}</style>", unsafe_allow_html=True
+    )
+    st.session_state.setdefault("messages", [])
+    st.session_state.setdefault("factchecks", {})
+    st.session_state.setdefault("chat_error", None)
 
-    Args:
-        args (argparse.Namespace): The command-line arguments.
-    """
-    st.title("LLM-jp Fact-Check")
+    heading, actions = st.columns([5, 1])
+    with heading:
+        st.markdown(
+            '<header class="app-header"><div class="app-brand"><span class="brand-symbol" aria-hidden="true">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M20 11V6a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3h1v3l4-3h2"/>'
+            '<path d="m15 15 2 2 4-5"/></svg></span>'
+            "<div><h1>LLM-jp Fact-Check</h1></div></div>"
+            '<p class="app-description">Chat with a language model and check its responses against evidence.</p></header>',
+            unsafe_allow_html=True,
+        )
+    with actions:
+        st.button("New chat", key="new_chat", use_container_width=True, on_click=_new_chat)
 
-    with st.form("form", clear_on_submit=False):
-        st.write("Enter the document (and the context if applicable) you want to fact-check.")
-        context = st.text_area("Context")
-        text = st.text_area("Document")
-        submitted = st.form_submit_button("Submit")
+    if args.mock:
+        st.info("Mock mode: chat responses and fact-check results use synthetic data. No external services are called.")
 
-    if submitted:
-        st.subheader("Input context")
-        st.markdown(context)
+    if not st.session_state["messages"]:
+        st.markdown(
+            '<section class="welcome-panel"><span class="welcome-icon" aria-hidden="true">'
+            '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" '
+            'stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M30 29H15l-7 6v-9a5 5 0 0 1-3-4V11a5 5 0 0 1 5-5h20a5 5 0 0 1 5 5v13a5 5 0 0 1-5 5Z"/>'
+            '<path d="M18 34v1a4 4 0 0 0 4 4h12l7 5V20a4 4 0 0 0-4-4M13 14h14M13 21h9"/>'
+            "</svg></span><h2>Start a conversation</h2>"
+            '<p class="welcome-description">Ask a question or explore a topic. '
+            "You can check any response to examine the claims it makes.</p>"
+            '<div class="workflow-grid">'
+            '<div class="workflow-step"><span class="step-number">01</span>'
+            "<div><h3>Discuss a topic</h3><p>Send a message below and continue with follow-up questions.</p></div></div>"
+            '<div class="workflow-step"><span class="step-number">02</span>'
+            "<div><h3>Check a response</h3><p>Select <strong>Fact-check response</strong> below a reply "
+            "to inspect its claims and evidence.</p></div></div></div></section>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<h2 class="conversation-heading">Conversation</h2>', unsafe_allow_html=True)
+    for index, message in enumerate(st.session_state["messages"]):
+        _render_message(message, index, args)
 
-        st.subheader("Input document")
-        st.markdown(text)
+    if st.session_state.pop("pending_response", False):
+        _generate_response(args)
+    elif (
+        st.session_state["messages"]
+        and st.session_state["messages"][-1]["role"] == "user"
+        and not st.session_state["chat_error"]
+    ):
+        st.session_state["chat_error"] = "Response generation was interrupted. Select Retry response to try again."
 
-        with st.spinner("Decomposing the document into claims..."):
-            claims = decompose_document_into_claims(
-                document=text,
-                context=context,
-                model=args.engine,
-            )
-
-        st.subheader("Result of claim detection")
-        for i, claim in enumerate(claims, 1):
-            st.markdown(f"- Claim {i}: {claim}")
-
-        with st.spinner("Identifying check-worthy claims..."):
-            checkworthy_labels = identify_checkworthiness(claims, args.engine)
-            checkworthy_claims = [claim for claim, label in zip(claims, checkworthy_labels) if label]
-
-        st.subheader("Result of check-worthy prediction")
-        for i, label in enumerate(checkworthy_labels, 1):
-            st.markdown(f"- Claim {i}: {'Checkworthy' if label else 'Not Checkworthy'}")
-
-        @st.cache_resource
-        def _get_tokenizer(tokenizer_name_or_path: str):
-            return AutoTokenizer.from_pretrained(tokenizer_name_or_path)
-
-        @st.cache_resource
-        def _create_elasticsearch_client(host: str):
-            return create_elasticsearch_client(host)
-
-        @st.cache_resource
-        def _create_relevance_scorer(embedding: str):
-            return create_relevance_scorer(embedding)
-
-        tokenizer = _get_tokenizer(args.tokenizer_name)
-        es = _create_elasticsearch_client(args.es_host)
-        scorer = _create_relevance_scorer(args.embedding)
-
-        st.subheader("Result of verifiation")
-        for claim in checkworthy_claims:
-            st.markdown(f"**Claim**: {claim.strip()}")
-
-            with st.spinner("Retrieving the evidences..."):
-                claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
-                evidence_candidates = []
-                hits = search_documents(
-                    es,
-                    args.es_dump_index,
-                    body={
-                        "query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}},
-                    },
-                    size=3,
-                    max_concurrent_shard_requests=64,
-                )
-
-            with st.spinner("Extracting the most related snippets..."):
-                for hit in hits:
-                    text = tokenizer.decode(list(map(int, hit["_source"]["token_ids"].split()))).strip()
-                    dataset = hit["_source"]["dataset_name"]
-                    training_step = hit["_source"]["iteration"]
-                    for passage in chunk_document(text):
-                        score = scorer(claim, passage)
-                        evidence_candidates.append(
-                            {
-                                "passage": passage,
-                                "dataset": dataset,
-                                "training_step": training_step,
-                                "score": score,
-                            }
-                        )
-                evidences = sorted(evidence_candidates, key=lambda x: x["score"], reverse=True)[: args.num_evidences]
-
-            with st.spinner("Retrieving the meta information of the evidences..."):
-                for evidence in evidences:
-                    evidence_token_ids = tokenizer.encode(evidence["passage"], add_special_tokens=False)
-                    hits = search_documents(
-                        es,
-                        args.es_meta_index,
-                        body={
-                            "query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}},
-                        },
-                        size=1,
-                        max_concurrent_shard_requests=64,
-                    )
-                    if hits:
-                        evidence["meta"] = json.loads(hits[0]["_source"]["meta"])
-                    else:
-                        evidence["meta"] = {}
-
-            for i, evidence in enumerate(evidences, 1):
-                with st.expander(f"Evidence {i}"):
-                    st.markdown(f"Dataset: {evidence['dataset']}")
-                    st.markdown(f"Training Step: {evidence['training_step']}")
-                    st.markdown("Meta information:")
-                    st.markdown("\n".join(f"- {k}: {v}" for k, v in evidence["meta"].items()))
-                    st.markdown(evidence["passage"])
-                    st.markdown("---")
-
-            with st.spinner("Verifying the check-worthy claims..."):
-                result = verify_claim(claim, [e["passage"] for e in evidences], args.engine)
-
-            st.markdown(f"**Result**: {'Supported' if result['label'] else 'Not Supported'}")
-            st.markdown(f"**Rationale**: {result['rationale']}")
-            st.markdown("--")
+    if st.session_state["chat_error"]:
+        st.error(f"Response generation failed: {st.session_state['chat_error']}")
+        st.button("Retry response", key="retry_response", on_click=_request_response)
+    if st.session_state.get("input_error"):
+        st.warning(st.session_state["input_error"])
+    st.chat_input("Message the model", key="chat_input", on_submit=_submit_message)
 
 
 if __name__ == "__main__":
     args = parse_args()
-
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(name)s:%(lineno)d: %(levelname)s: %(message)s",
     )
-
     main(args)

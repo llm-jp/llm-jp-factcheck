@@ -1,9 +1,9 @@
-from typing import Callable
+from __future__ import annotations
 
-import torch
-from elasticsearch import Elasticsearch
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from transformers import AutoModel, AutoTokenizer
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from elasticsearch import Elasticsearch
 
 
 def create_elasticsearch_client(host: str) -> Elasticsearch:
@@ -15,6 +15,8 @@ def create_elasticsearch_client(host: str) -> Elasticsearch:
     Returns:
         Elasticsearch: The Elasticsearch client.
     """
+    from elasticsearch import Elasticsearch
+
     return Elasticsearch(host)
 
 
@@ -49,11 +51,16 @@ def chunk_document(document: str, chunk_size: int = 500, chunk_overlap: int = 20
     Returns:
         list[str]: The list of passages.
     """
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return text_splitter.split_text(document)
 
 
 def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     model = AutoModel.from_pretrained(model_name)
@@ -87,13 +94,3 @@ def create_relevance_scorer(model_name: str) -> Callable[[str, str], float]:
         return torch.cosine_similarity(query_embedding, passage_embedding, dim=0).item()
 
     return calculate_relevance_score
-
-
-if __name__ == "__main__":
-    scorer = create_relevance_scorer("intfloat/multilingual-e5-small")
-    print(scorer("The capital of France is Paris.", "Paris is the capital of France."))
-    print(scorer("The capital of France is Paris.", "Paris is the capital of the US."))
-    print(scorer("The capital of France is Paris.", "フランスの首都はパリです。"))
-
-    document = "The capital of France is Paris. The Eiffel Tower is in Paris."
-    print(chunk_document(document, chunk_size=50, chunk_overlap=20))
