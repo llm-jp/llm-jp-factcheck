@@ -133,7 +133,7 @@ Prompts are UTF-8 JSON files containing `system` and `user` strings. Edit these 
 
 | Task | Default file | Required placeholders | Optional placeholders |
 | --- | --- | --- | --- |
-| Decomposition | `prompts/decomposition.json` | `{{document}}` | `{{context}}` |
+| Decomposition | `prompts/decomposition_8shot.json` | `{{document}}` | `{{context}}` |
 | Check-worthiness | `prompts/checkworthiness.json` | `{{claim}}` | None |
 | Verification | `prompts/verification.json` | `{{claim}}`, `{{evidence}}` | None |
 
@@ -169,7 +169,7 @@ from verify import verify_claim
 claims = decompose_document_into_claims(
     "London is the capital of England.",
     model="your-factcheck-model-or-deployment",
-    prompt_path="prompts/decomposition.json",
+    prompt_path="prompts/decomposition_8shot.json",
 )
 for claim in claims:
     is_checkworthy = identify_checkworthiness(
@@ -196,7 +196,47 @@ JSON Schemas in Python define the output contract: decomposition returns a list 
 - `Refuted`
 - `Not enough information`
 
-The bundled decomposition prompt is provisional and follows the decomposition guidelines in §4 of [Masano et al. (LREC 2026)](https://aclanthology.org/2026.lrec-1.186/). It does not reproduce the paper's complete experimental prompt or its eight selected examples. That paper does not define this five-label verification scheme, so the bundled verification criteria are also provisional. Replace both files when the intended prompts are available.
+The default decomposition prompt uses **guideline + 8-shot**, based on the rule/example/explanation guidelines and eight development examples from the paper's `experiment/lrec2026` branch. The 13 guideline sections and their instructional examples are retained in Japanese to preserve the source wording. Demonstration outputs use the application's JSON Schema contract. Conversation context is used only to resolve references; check-worthiness remains a separate step. The source revision, example IDs, and file paths are recorded in [evaluations/decomposition_8shot_source.json](evaluations/decomposition_8shot_source.json). Edit `prompts/decomposition_8shot.json` to change the default instructions. The zero-shot variant remains available in `prompts/decomposition.json`.
+
+The paper does not define this application's five-label verification scheme. The bundled verification criteria remain provisional and can be replaced independently.
+
+## Evaluate claim decomposition
+
+See the completed [guideline/zero-shot evaluation](evaluations/decomposition_guideline_zero_shot.md) and [guideline/8-shot comparison](evaluations/decomposition_guideline_8shot.md) for five-run AIO test results with `gpt-5.4-2026-03-05`.
+
+The evaluation follows §6.2 of [Masano et al. (LREC 2026)](https://aclanthology.org/2026.lrec-1.186/): exact string matching and fuzzy matching with content-word Jaccard similarity. A maximum-weight one-to-one assignment matches predicted and gold claims before applying the threshold. Fuzzy matches use `similarity >= 0.8`, following the reference code. MeCab with UniDic-lite extracts nouns, verbs, adjectives, and adverbs using the reference evaluator's field 10, with surface-form fallback. Precision, recall, and F1 are calculated per generated text and macro-averaged separately. The reported result averages five independent prediction runs.
+
+Install the optional evaluation dependencies and evaluate the default **guideline + 8-shot** prompt:
+
+```bash
+uv sync --locked --group evaluation
+uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --output result/decomposition-guideline-8shot
+```
+
+The runner reads the pinned experiment revision directly from the dataset repository using `git show`; it does not change that repository's checkout. It uses the original AIO test split (210 texts, 1,169 gold claims), including non-check-worthy claims. It neither filters claims nor passes gold claims or the dataset's questions to the model. Only the generated text is decomposed, matching the reference experiment. The CBA test split is absent from this experiment revision and is not recreated or substituted with the verification dataset's split.
+
+To evaluate **guideline + 0-shot** instead, select both its prompt and source manifest:
+
+```bash
+uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --prompt prompts/decomposition.json \
+  --source-manifest evaluations/decomposition_source.json \
+  --model gpt-5.4-2026-03-05 \
+  --output result/decomposition-guideline-zero-shot
+```
+
+The eight demonstrations come from the pinned branch's `scripts/prompts/decomposition/fewshot/8shot.txt`. Its `manual_rule+example+expl_8shot.txt` actually contains only six demonstrations; those six are identical to the first six in the complete few-shot file. The eight-shot prompt combines the existing zero-shot guideline with all eight examples and adapts their output wrappers to `{"claims": [...]}`. All eight inputs were verified against the development set and have no overlap with the test set. Their document IDs and source paths are recorded in the source manifest. The app and evaluation runner use eight-shot by default. To select zero-shot in the app, pass `--decomposition-prompt prompts/decomposition.json` when starting Streamlit.
+
+This command sends live requests through the Factchecker endpoint configured in `.env`. Model precedence is `--model`, then `FACTCHECKER_MODEL`, then `gpt-5.4-2026-03-05`. `--prompt` changes the editable prompt file; `--runs` defaults to `5` and `--max-concurrency` to `8`. `--request-timeout` sets the API request timeout in seconds (default: `120`, with the SDK's standard retries). `--limit N` runs a clearly marked smoke-test subset. Each completed prediction is saved; rerunning the same command resumes missing predictions. A changed model, prompt, dataset, generation implementation, or dependency version requires a different output directory. Incomplete runs fail instead of silently dropping missing documents.
+
+The output directory contains the prompt snapshot, gold data, protocol and SHA-256 hashes, predictions for each run, per-document scores and match assignments, and `summary.json` with the run means and population standard deviations. Files under `result/` are ignored by Git. Recompute metrics without API requests using the same command with `--score-only`.
+
+Matching uses the reference Hungarian implementation, including its tie resolution. Different optimal assignments can have the same total similarity but different numbers of pairs above the threshold. If only `src/claim_metrics.py` changes, use `--score-only --refresh-metrics` to re-score existing predictions; the previous scoring protocol is preserved in `previous_scoring_protocol.json`. Changes to the model, prompt, dataset, generation code, or dependency versions still require a separate output directory.
+
+These results evaluate the application's configured model and Structured Outputs. The paper used GPT-4o, while this application defaults to GPT-5.4 and provider-default sampling. The prompt's output wrapper and handling of application context also differ from the original experimental runner. Treat these as an evaluation using the paper's guidelines and metrics, not an exact replication of its published model scores. Exact matching preserves the dataset's original whitespace and punctuation; the application's returned predictions have outer whitespace stripped as in normal use.
 
 ## Development
 
@@ -204,13 +244,15 @@ The bundled decomposition prompt is provisional and follows the decomposition gu
 
 ```bash
 PYTHONPATH=src uv run --locked python -m unittest discover -s tests -v
-uv run --locked ruff check src tests
-uv run --locked ruff format --check src tests
+uv run --locked ruff check src tests scripts
+uv run --locked ruff format --check src tests scripts
 uv lock --check
 ```
 
+To include the evaluation metric tests, use `PYTHONPATH=src uv run --locked --group evaluation python -m unittest discover -s tests -v`. These tests need no API access. Without that dependency group, metric tests are skipped.
+
 To enable the Git hooks, run `uv run --locked pre-commit install`. The hooks use the project's locked Ruff version and check that `uv.lock` is up to date.
 
-Tests mock LLM calls, retrieval, and tokenizer loading. SDK requests also run against a mock HTTP transport to check independent endpoint routing, authentication, and Azure API versions for all provider combinations. Tests cover multi-turn chat, response-specific verification and result persistence, decomposition context, conversation reset, prompt replacement, output validation, pair-level verdicts, progress, and error handling. They do not send live API requests. Accuracy evaluation requires the actual models and indexes.
+Tests mock LLM calls, retrieval, and tokenizer loading. SDK requests also run against a mock HTTP transport to check independent endpoint routing, authentication, and Azure API versions for all provider combinations. Tests cover multi-turn chat, response-specific verification and result persistence, decomposition context, conversation reset, prompt replacement, output validation, pair-level verdicts, progress, and error handling. They do not send live API requests. Decomposition accuracy evaluation uses the live Factchecker model and does not require Elasticsearch.
 
 Manage dependencies with `uv add`, `uv add --dev`, and `uv remove`. Commit changes to both `pyproject.toml` and `uv.lock` together.

@@ -17,6 +17,12 @@ dev = [
     "pre-commit>=4.0,<5",
     "ruff==0.16.7",
 ]
+evaluation = [
+    "mecab-python3>=1.0.10,<2",
+    "numpy>=1.26,<3",
+    "scipy>=1.14,<2",
+    "unidic-lite==1.0.8",
+]
 
 [tool.uv]
 package = false

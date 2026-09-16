@@ -1,0 +1,21 @@
+{
+  "repository": "llm-jp-evidence-verification-dataset",
+  "revision": "e43e3898959860caa0feaf1708e820ecec330584",
+  "prompt_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl.txt",
+  "test_source": "data/aio_test.json",
+  "gold_source": "data/claim_decomposition/AIO.json",
+  "fewshot_source": "scripts/prompts/decomposition/fewshot/8shot.txt",
+  "fewshot_document_ids": [
+    "AIO02-0044",
+    "AIO02-0038",
+    "AIO02-0081",
+    "AIO02-0092",
+    "AIO02-0053",
+    "AIO02-0060",
+    "AIO02-0069",
+    "AIO02-0074"
+  ],
+  "additional_shots": 8,
+  "incomplete_guideline_8shot_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl_8shot.txt",
+  "adaptation": "Use the existing zero-shot guideline plus all eight fewshot examples; the guideline_8shot source contains only the first six. Adapt example outputs to the application claims object."
+}

@@ -21,6 +21,7 @@ class PromptTests(unittest.TestCase):
     def test_default_templates_have_required_inputs(self):
         cases = [
             ("decomposition.json", {"document": "本文", "context": "背景"}, {"document"}),
+            ("decomposition_8shot.json", {"document": "本文", "context": "背景"}, {"document"}),
             ("checkworthiness.json", {"claim": "Claim A"}, {"claim"}),
             ("verification.json", {"claim": "主張", "evidence": "証拠"}, {"claim", "evidence"}),
         ]
