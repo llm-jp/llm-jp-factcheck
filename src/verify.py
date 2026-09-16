@@ -4,7 +4,7 @@ from pathlib import Path
 
 from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
-from utils import parse_tool_response
+from utils import parse_json_response
 
 DEFAULT_PROMPT_PATH = PROMPT_DIR / "verification.json"
 VERIFICATION_LABELS = (
@@ -15,12 +15,13 @@ VERIFICATION_LABELS = (
     "Not enough information",
 )
 
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "setVerificationResult",
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "verification",
+        "strict": True,
         "description": "Verify one claim against one evidence passage using the five specified labels.",
-        "parameters": {
+        "schema": {
             "type": "object",
             "properties": {
                 "rationale": {"type": "string", "description": "Explain the label using the supplied evidence."},
@@ -31,8 +32,6 @@ TOOL = {
         },
     },
 }
-
-TOOL_CHOICE = {"type": "function", "function": {"name": "setVerificationResult"}}
 
 
 def verify_claim(
@@ -57,10 +56,9 @@ def verify_claim(
     response = get_client("factchecker").chat.completions.create(
         model=model,
         messages=messages,
-        tools=[TOOL],
-        tool_choice=TOOL_CHOICE,
+        response_format=RESPONSE_FORMAT,
     )
-    payload = parse_tool_response(response, "setVerificationResult")
+    payload = parse_json_response(response)
     if set(payload) != {"label", "rationale"}:
         raise ValueError("Verification response must contain exactly 'label' and 'rationale'.")
     label = payload["label"]

@@ -72,7 +72,7 @@ def get_client(role: ClientRole) -> OpenAI:
             api_version=config.api_version,
             azure_endpoint=config.endpoint,
         )
-        # The pinned SDK reads a global AD token even with an explicit API key.
+        # The SDK reads a global AD token even with an explicit API key.
         # These connections use API keys, so a token for another resource must not override them.
         client._azure_ad_token = None
     else:

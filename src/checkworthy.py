@@ -6,16 +6,17 @@ from pathlib import Path
 
 from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
-from utils import parse_tool_response
+from utils import parse_json_response
 
 DEFAULT_PROMPT_PATH = PROMPT_DIR / "checkworthiness.json"
 
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "setCheckworthyLabels",
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "checkworthiness",
+        "strict": True,
         "description": "Decide whether each claim should be fact-checked, preserving input order.",
-        "parameters": {
+        "schema": {
             "type": "object",
             "properties": {
                 "labels": {
@@ -29,7 +30,6 @@ TOOL = {
         },
     },
 }
-TOOL_CHOICE = {"type": "function", "function": {"name": "setCheckworthyLabels"}}
 
 
 def identify_checkworthiness(claims: list[str], model: str, *, prompt_path: str | Path | None = None) -> list[bool]:
@@ -48,10 +48,9 @@ def identify_checkworthiness(claims: list[str], model: str, *, prompt_path: str 
     response = get_client("factchecker").chat.completions.create(
         model=model,
         messages=messages,
-        tools=[TOOL],
-        tool_choice=TOOL_CHOICE,
+        response_format=RESPONSE_FORMAT,
     )
-    payload = parse_tool_response(response, "setCheckworthyLabels")
+    payload = parse_json_response(response)
     if set(payload) != {"labels"}:
         raise ValueError("Check-worthiness response must contain exactly 'labels'.")
     labels = payload["labels"]

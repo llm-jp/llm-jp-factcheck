@@ -6,11 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
-from openai import AzureOpenAI, OpenAI
+from openai import AzureOpenAI, BadRequestError, OpenAI
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import chat
+import checkworthy
 import clients
 import decompose
 import verify
@@ -71,21 +72,15 @@ class ClientTests(unittest.TestCase):
             ]
             data = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
             return httpx.Response(200, text=data, headers={"content-type": "text/event-stream"})
-        tool_name = body.get("tool_choice", {}).get("function", {}).get("name")
+        schema_name = body.get("response_format", {}).get("json_schema", {}).get("name")
         message = {"role": "assistant", "content": "OK"}
-        if tool_name:
-            arguments = (
-                {"claims": ["Kyoto is in Japan."]}
-                if tool_name == "createClaimList"
-                else {"label": "Supported", "rationale": "The evidence states the claim."}
-            )
-            message["tool_calls"] = [
-                {
-                    "id": "call-1",
-                    "type": "function",
-                    "function": {"name": tool_name, "arguments": json.dumps(arguments)},
-                }
-            ]
+        if schema_name:
+            payloads = {
+                "decomposition": {"claims": ["Kyoto is in Japan."]},
+                "checkworthiness": {"labels": [True]},
+                "verification": {"label": "Supported", "rationale": "The evidence states the claim."},
+            }
+            message["content"] = json.dumps(payloads[schema_name])
         return httpx.Response(
             200,
             json={
@@ -93,7 +88,7 @@ class ClientTests(unittest.TestCase):
                 "object": "chat.completion",
                 "created": 0,
                 "model": body["model"],
-                "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if tool_name else "stop"}],
+                "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
             },
         )
 
@@ -106,11 +101,12 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(request.url.path, f"/openai/deployments/{model}/chat/completions")
             self.assertEqual(request.url.params["api-version"], f"{role}-version")
             self.assertEqual(request.headers["api-key"], f"{role}-key")
+            self.assertNotIn("Authorization", request.headers)
         else:
             self.assertEqual(request.url.path, "/v1/chat/completions")
             self.assertFalse(request.url.params)
             self.assertNotIn("api-key", request.headers)
-        self.assertEqual(request.headers["Authorization"], f"Bearer {role}-key")
+            self.assertEqual(request.headers["Authorization"], f"Bearer {role}-key")
 
     def test_both_roles_support_each_provider_with_isolated_urls_and_auth(self):
         ambient = {
@@ -139,19 +135,53 @@ class ClientTests(unittest.TestCase):
                         self.assertIsNot(clients.get_client("chatbot"), clients.get_client("factchecker"))
                         self.assertEqual(len(self.created_clients), 2)
 
-    def test_real_callers_send_chat_to_chatbot_and_both_tools_to_factchecker(self):
-        with patch.dict(os.environ, {**role_env("chatbot"), **role_env("factchecker", "azure")}):
-            answer = "".join(chat.stream_chat_response([{"role": "user", "content": "Where is Kyoto?"}], "chat-model"))
-            claims = decompose.decompose_document_into_claims(answer, "check-model")
-            verdict = verify.verify_claim(claims[0], "Kyoto is in Japan.", "check-model")
-        self.assertEqual(answer, "Kyoto is in Japan.")
-        self.assertEqual(claims, [answer])
-        self.assertEqual(verdict["label"], "Supported")
-        self.assertEqual(len(self.requests), 3)
-        self.assert_route(self.requests[0], "chatbot", "openai", "chat-model")
-        self.assert_route(self.requests[1], "factchecker", "azure", "check-model")
-        self.assert_route(self.requests[2], "factchecker", "azure", "check-model")
-        self.assertEqual(len(self.created_clients), 2)
+    def test_real_callers_route_structured_outputs_to_each_factchecker_provider(self):
+        for api_type in ("openai", "azure"):
+            with (
+                self.subTest(api_type=api_type),
+                patch.dict(os.environ, {**role_env("chatbot"), **role_env("factchecker", api_type)}),
+            ):
+                self.close_clients()
+                self.requests.clear()
+                answer = "".join(
+                    chat.stream_chat_response([{"role": "user", "content": "Where is Kyoto?"}], "chat-model")
+                )
+                claims = decompose.decompose_document_into_claims(answer, "check-model")
+                labels = checkworthy.identify_checkworthiness(claims, "check-model")
+                verdict = verify.verify_claim(claims[0], "Kyoto is in Japan.", "check-model")
+                self.assertEqual(answer, "Kyoto is in Japan.")
+                self.assertEqual(claims, [answer])
+                self.assertEqual(labels, [True])
+                self.assertEqual(verdict["label"], "Supported")
+                self.assertEqual(len(self.requests), 4)
+                self.assert_route(self.requests[0], "chatbot", "openai", "chat-model")
+                self.assertNotIn("response_format", json.loads(self.requests[0].content))
+                for request, name in zip(
+                    self.requests[1:], ["decomposition", "checkworthiness", "verification"], strict=True
+                ):
+                    self.assert_route(request, "factchecker", api_type, "check-model")
+                    body = json.loads(request.content)
+                    self.assertNotIn("tools", body)
+                    self.assertNotIn("tool_choice", body)
+                    self.assertEqual(body["response_format"]["type"], "json_schema")
+                    self.assertEqual(body["response_format"]["json_schema"]["name"], name)
+                    self.assertIs(body["response_format"]["json_schema"]["strict"], True)
+                self.assertEqual(len(self.created_clients), 2)
+
+    def test_unsupported_structured_outputs_reports_error_without_fallback(self):
+        with (
+            patch.dict(os.environ, role_env("factchecker")),
+            patch.object(
+                self,
+                "respond",
+                return_value=httpx.Response(
+                    400, json={"error": {"message": "json_schema is not supported", "type": "invalid_request_error"}}
+                ),
+            ) as respond,
+        ):
+            with self.assertRaisesRegex(BadRequestError, "json_schema is not supported"):
+                decompose.decompose_document_into_claims("Text", "unsupported-model")
+            respond.assert_called_once()
 
     def test_unconfigured_role_uses_legacy_azure_settings(self):
         with patch.dict(os.environ, LEGACY_ENV):

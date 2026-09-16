@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "elasticsearch==8.13.0",
-    "openai==1.25.0",
+    "openai>=2,<3",
     "python-dotenv==1.0.1",
     "streamlit==1.33.0",
     "transformers==4.40.1",
@@ -20,8 +20,6 @@ dev = [
 
 [tool.uv]
 package = false
-# OpenAI 1.25 passes the proxies argument removed in HTTPX 0.28.
-constraint-dependencies = ["httpx<0.28"]
 
 [tool.ruff]
 line-length = 120

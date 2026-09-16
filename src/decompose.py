@@ -4,16 +4,17 @@ from pathlib import Path
 
 from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
-from utils import parse_tool_response
+from utils import parse_json_response
 
 DEFAULT_PROMPT_PATH = PROMPT_DIR / "decomposition.json"
 
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "createClaimList",
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "decomposition",
+        "strict": True,
         "description": "Create a list of self-contained claims from generated text.",
-        "parameters": {
+        "schema": {
             "type": "object",
             "properties": {
                 "claims": {
@@ -27,8 +28,6 @@ TOOL = {
         },
     },
 }
-
-TOOL_CHOICE = {"type": "function", "function": {"name": "createClaimList"}}
 
 
 def decompose_document_into_claims(
@@ -53,10 +52,9 @@ def decompose_document_into_claims(
     response = get_client("factchecker").chat.completions.create(
         model=model,
         messages=messages,
-        tools=[TOOL],
-        tool_choice=TOOL_CHOICE,
+        response_format=RESPONSE_FORMAT,
     )
-    payload = parse_tool_response(response, "createClaimList")
+    payload = parse_json_response(response)
     if set(payload) != {"claims"}:
         raise ValueError("Decomposition response must contain exactly 'claims'.")
     claims = payload["claims"]

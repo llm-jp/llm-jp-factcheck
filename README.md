@@ -41,7 +41,9 @@ FACTCHECKER_API_VERSION="your-supported-api-version"
 FACTCHECKER_MODEL="your-factcheck-deployment-name"
 ```
 
-The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support tool calling. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection or model settings in `.env` or the environment.
+The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) through Chat Completions with `response_format.type=json_schema` and `strict=true`. This requirement applies to OpenAI-compatible servers and Azure deployments as well. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection or model settings in `.env` or the environment.
+
+Decomposition, check-worthiness, and verification each send a JSON Schema and read the JSON object from the assistant message content. All schema fields are required, extra fields are forbidden, and verification labels are constrained to the five supported values. Refusals, incomplete responses, invalid JSON, and invalid values are reported as errors. Unsupported endpoints are not retried with function calling or a weaker output format.
 
 For compatibility, a role with none of its four prefixed connection variables set uses the shared legacy `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION` settings. Setting any prefixed connection variable requires a complete configuration for that role; missing values are never filled from the shared settings. Model variables alone do not disable this legacy connection fallback. Global `OPENAI_*` variables are not used as a fallback.
 
@@ -79,6 +81,8 @@ Model selection uses the following precedence:
 | Chatbot | `--chat-engine`, then `CHATBOT_MODEL`, then the resolved fact-checker model |
 
 The app loads the project-root `.env` without overriding existing process environment variables. Blank or whitespace-only model variables count as unset. Use model IDs accepted by the endpoint in `openai` mode and deployment names in `azure` mode. Azure v1 endpoints also expect deployment names.
+
+Set `FACTCHECKER_MODEL` or `--engine` to a model or deployment that supports Structured Outputs. The historical fallback name `gpt-4-0613` is retained for existing deployment configurations; the OpenAI model of that name does not support this output format.
 
 Override model settings and supply retrieval options on the command line:
 
@@ -177,7 +181,7 @@ for claim, is_checkworthy in zip(claims, labels, strict=True):
     # The result contains "label" and "rationale".
 ```
 
-Python tool schemas define the output contract: decomposition returns a list of claim strings, check-worthiness returns one boolean per claim in input order, and verification returns `label` and `rationale`. Invalid outputs, including a wrong number of check-worthiness labels, raise errors. Verification accepts exactly five labels:
+JSON Schemas in Python define the output contract: decomposition returns a list of claim strings, check-worthiness returns one boolean per claim in input order, and verification returns `label` and `rationale`. Application validation also rejects invalid values and a wrong number of check-worthiness labels. Prompt files control instructions and examples independently of these schemas. Custom prompts should request JSON output rather than function calls. Verification accepts exactly five labels:
 
 - `Supported`
 - `Partially supported`

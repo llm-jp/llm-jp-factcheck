@@ -15,16 +15,13 @@ import decompose
 import verify
 
 
-def tool_call(name, arguments):
-    return SimpleNamespace(type="function", function=SimpleNamespace(name=name, arguments=arguments))
+def response_with_content(content, finish_reason="stop", refusal=None, tool_calls=None):
+    message = SimpleNamespace(content=content, refusal=refusal, tool_calls=tool_calls)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish_reason)])
 
 
-def response_with_calls(calls):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=calls))])
-
-
-def response(name, payload):
-    return response_with_calls([tool_call(name, json.dumps(payload, ensure_ascii=False))])
+def response(payload):
+    return response_with_content(json.dumps(payload, ensure_ascii=False))
 
 
 class LLMTests(unittest.TestCase):
@@ -36,10 +33,8 @@ class LLMTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return mocked, getter
 
-    def test_decomposes_with_context_and_forced_tool(self):
-        mocked, getter = self.mock_client(
-            decompose, response("createClaimList", {"claims": ["  美咲は大阪に住んでいる。  "]})
-        )
+    def test_decomposes_with_context_and_json_schema(self):
+        mocked, getter = self.mock_client(decompose, response({"claims": ["  美咲は大阪に住んでいる。  "]}))
         self.assertEqual(
             decompose.decompose_document_into_claims("彼女は大阪に住んでいる。", "deployment", "美咲について"),
             ["美咲は大阪に住んでいる。"],
@@ -47,11 +42,11 @@ class LLMTests(unittest.TestCase):
         getter.assert_called_once_with("factchecker")
         kwargs = mocked.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "deployment")
-        self.assertEqual(kwargs["tool_choice"]["function"]["name"], "createClaimList")
+        self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "decomposition")
         self.assertIn("美咲について", kwargs["messages"][1]["content"])
 
     def test_decomposition_without_context_does_not_insert_none(self):
-        mocked, _ = self.mock_client(decompose, response("createClaimList", {"claims": []}))
+        mocked, _ = self.mock_client(decompose, response({"claims": []}))
         self.assertEqual(decompose.decompose_document_into_claims("No assertions", "deployment"), [])
         self.assertNotIn("None", mocked.chat.completions.create.call_args.kwargs["messages"][1]["content"])
 
@@ -64,7 +59,7 @@ class LLMTests(unittest.TestCase):
         mocked, _ = self.mock_client(decompose, None)
         for payload in [{}, [], {"claims": "one"}, {"claims": [None]}, {"claims": [" "]}, {"claims": [], "extra": 1}]:
             with self.subTest(payload=payload):
-                mocked.chat.completions.create.return_value = response("createClaimList", payload)
+                mocked.chat.completions.create.return_value = response(payload)
                 with self.assertRaises(ValueError):
                     decompose.decompose_document_into_claims("Text", "deployment")
 
@@ -76,7 +71,7 @@ class LLMTests(unittest.TestCase):
             with self.subTest(label=label):
                 getter.reset_mock()
                 mocked.chat.completions.create.return_value = response(
-                    "setVerificationResult", {"label": label, "rationale": " Evidence-based explanation. "}
+                    {"label": label, "rationale": " Evidence-based explanation. "}
                 )
                 self.assertEqual(
                     verify.verify_claim("Claim A", "Evidence B", "deployment"),
@@ -87,9 +82,9 @@ class LLMTests(unittest.TestCase):
                 self.assertEqual(kwargs["model"], "deployment")
                 self.assertIn("Claim A", kwargs["messages"][1]["content"])
                 self.assertIn("Evidence B", kwargs["messages"][1]["content"])
-                self.assertEqual(kwargs["tool_choice"]["function"]["name"], "setVerificationResult")
+                self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "verification")
                 self.assertEqual(
-                    kwargs["tools"][0]["function"]["parameters"]["properties"]["label"]["enum"], list(labels)
+                    kwargs["response_format"]["json_schema"]["schema"]["properties"]["label"]["enum"], list(labels)
                 )
 
     def test_empty_evidence_is_nei_without_api_call(self):
@@ -121,21 +116,21 @@ class LLMTests(unittest.TestCase):
         ]
         for payload in payloads:
             with self.subTest(payload=payload):
-                mocked.chat.completions.create.return_value = response("setVerificationResult", payload)
+                mocked.chat.completions.create.return_value = response(payload)
                 with self.assertRaises(ValueError):
                     verify.verify_claim("Claim", "Evidence", "deployment")
 
     def test_checkworthiness_returns_ordered_labels_using_factchecker(self):
-        mocked, getter = self.mock_client(checkworthy, response("setCheckworthyLabels", {"labels": [False, True]}))
+        mocked, getter = self.mock_client(checkworthy, response({"labels": [False, True]}))
         claims = ["This film is wonderful.", "The museum opened in 2012."]
         self.assertEqual(checkworthy.identify_checkworthiness(claims, "deployment"), [False, True])
         getter.assert_called_once_with("factchecker")
         kwargs = mocked.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "deployment")
         self.assertIn("- This film is wonderful.\n- The museum opened in 2012.", kwargs["messages"][1]["content"])
-        self.assertEqual(kwargs["tool_choice"]["function"]["name"], "setCheckworthyLabels")
+        self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "checkworthiness")
         self.assertEqual(
-            kwargs["tools"][0]["function"]["parameters"]["properties"]["labels"]["items"], {"type": "boolean"}
+            kwargs["response_format"]["json_schema"]["schema"]["properties"]["labels"]["items"], {"type": "boolean"}
         )
 
     def test_empty_or_invalid_checkworthiness_inputs_make_no_api_call(self):
@@ -163,12 +158,12 @@ class LLMTests(unittest.TestCase):
             {"labels": [True, False], "extra": 1},
         ]:
             with self.subTest(payload=payload):
-                mocked.chat.completions.create.return_value = response("setCheckworthyLabels", payload)
+                mocked.chat.completions.create.return_value = response(payload)
                 with self.assertRaises(ValueError):
                     checkworthy.identify_checkworthiness(["Claim A", "Claim B"], "deployment")
 
     def test_checkworthiness_prompt_can_be_replaced_and_reloads(self):
-        mocked, _ = self.mock_client(checkworthy, response("setCheckworthyLabels", {"labels": [True]}))
+        mocked, _ = self.mock_client(checkworthy, response({"labels": [True]}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.json"
             for instruction in ["First instructions", "Updated instructions"]:
@@ -187,28 +182,25 @@ class LLMTests(unittest.TestCase):
                 checkworthy.identify_checkworthiness(["Claim"], "deployment", prompt_path=path)
         getter.assert_not_called()
 
-    def test_malformed_tool_responses_fail_clearly_for_all_operations(self):
+    def test_malformed_json_responses_fail_clearly_for_all_operations(self):
         cases = [
-            (decompose, "createClaimList", lambda: decompose.decompose_document_into_claims("Text", "deployment")),
-            (
-                checkworthy,
-                "setCheckworthyLabels",
-                lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment"),
-            ),
-            (verify, "setVerificationResult", lambda: verify.verify_claim("Claim", "Evidence", "deployment")),
+            (decompose, lambda: decompose.decompose_document_into_claims("Text", "deployment")),
+            (checkworthy, lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment")),
+            (verify, lambda: verify.verify_claim("Claim", "Evidence", "deployment")),
         ]
-        for module, name, invoke in cases:
+        for module, invoke in cases:
             mocked, _ = self.mock_client(module, None)
             malformed = [
                 SimpleNamespace(choices=[]),
+                SimpleNamespace(choices=[SimpleNamespace(), SimpleNamespace()]),
                 SimpleNamespace(choices=[SimpleNamespace(message=None)]),
-                response_with_calls(None),
-                response_with_calls([]),
-                response_with_calls([tool_call("wrongTool", "{}")]),
-                response_with_calls([tool_call(name, "{}"), tool_call(name, "{}")]),
-                response_with_calls([tool_call(name, "{")]),
-                response_with_calls([tool_call(name, None)]),
-                response_with_calls([tool_call(name, "[]")]),
+                response_with_content(None),
+                response_with_content(""),
+                response_with_content(" \n "),
+                response_with_content("{"),
+                response_with_content("[]"),
+                response_with_content("null"),
+                response_with_content("```json\n{}\n```"),
             ]
             for ret in malformed:
                 with self.subTest(module=module.__name__, response=ret):
@@ -216,10 +208,70 @@ class LLMTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         invoke()
 
+    def test_refusals_partial_outputs_and_tool_calls_are_rejected(self):
+        cases = [
+            (decompose, {"claims": ["Claim"]}, lambda: decompose.decompose_document_into_claims("Text", "deployment")),
+            (checkworthy, {"labels": [True]}, lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment")),
+            (
+                verify,
+                {"label": "Supported", "rationale": "Reason"},
+                lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
+            ),
+        ]
+        for module, payload, invoke in cases:
+            mocked, _ = self.mock_client(module, None)
+            for options, expected_error in [
+                ({"refusal": "Cannot comply"}, "refused"),
+                ({"finish_reason": "length"}, "length"),
+                ({"finish_reason": "content_filter"}, "content_filter"),
+                ({"finish_reason": None}, "finish_reason"),
+                ({"finish_reason": "tool_calls", "tool_calls": [SimpleNamespace()]}, "tool_calls"),
+                ({"tool_calls": [SimpleNamespace()]}, "tool calls"),
+            ]:
+                with self.subTest(module=module.__name__, options=options):
+                    mocked.chat.completions.create.return_value = response_with_content(json.dumps(payload), **options)
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        invoke()
+
+    def test_each_task_requests_strict_json_schema_without_tools(self):
+        cases = [
+            (
+                decompose,
+                "decomposition",
+                {"claims": []},
+                lambda: decompose.decompose_document_into_claims("Text", "deployment"),
+            ),
+            (
+                checkworthy,
+                "checkworthiness",
+                {"labels": [True]},
+                lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment"),
+            ),
+            (
+                verify,
+                "verification",
+                {"label": "Supported", "rationale": "Reason"},
+                lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
+            ),
+        ]
+        for module, name, payload, invoke in cases:
+            with self.subTest(task=name):
+                mocked, _ = self.mock_client(module, response(payload))
+                invoke()
+                kwargs = mocked.chat.completions.create.call_args.kwargs
+                self.assertNotIn("tools", kwargs)
+                self.assertNotIn("tool_choice", kwargs)
+                self.assertEqual(kwargs["response_format"]["type"], "json_schema")
+                definition = kwargs["response_format"]["json_schema"]
+                self.assertEqual(definition["name"], name)
+                self.assertIs(definition["strict"], True)
+                self.assertEqual(definition["schema"]["type"], "object")
+                self.assertIs(definition["schema"]["additionalProperties"], False)
+                self.assertEqual(set(definition["schema"]["required"]), set(payload))
+                self.assertEqual(set(definition["schema"]["properties"]), set(payload))
+
     def test_custom_prompts_reload_between_invocations(self):
-        mocked, _ = self.mock_client(
-            verify, response("setVerificationResult", {"label": "Supported", "rationale": "Reason"})
-        )
+        mocked, _ = self.mock_client(verify, response({"label": "Supported", "rationale": "Reason"}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.json"
             for instruction in ["First instructions", "Replaced instructions"]:
