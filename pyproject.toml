@@ -1,14 +1,14 @@
 [project]
 name = "llm-jp-factcheck"
 version = "0.1.0"
-description = "A research demo for claim-level fact-checking of LLM conversations."
+description = "Chat with an LLM and check its claims using evidence retrieved from its training data."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "elasticsearch==8.13.0",
     "openai>=2,<3",
     "python-dotenv==1.0.1",
-    "streamlit==1.33.0",
+    "streamlit==1.48.0",
     "transformers==4.40.1",
 ]
 

@@ -1,6 +1,6 @@
 # LLM-jp Factcheck
 
-A Streamlit application for chatting with an LLM and checking individual responses against a searchable corpus. Each response is decomposed into claims, check-worthy claims are selected, and each selected claim–evidence pair receives a verdict and rationale. The interface uses a restrained white theme with progress messages throughout generation and verification.
+A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict and rationale. Users can inspect the evidence passages, their sources, and the associated training steps as results arrive.
 
 ## Setup
 
@@ -49,7 +49,7 @@ For compatibility, a role with none of its four prefixed connection variables se
 
 ### Retrieval
 
-Retrieval requires an existing Elasticsearch search index containing `token_ids` (space-separated token IDs), `dataset_name` (source), and `iteration` (training step). Source details come directly from each search result.
+Retrieval requires an existing Elasticsearch index of the LLM's training data containing `token_ids` (space-separated token IDs), `dataset_name` (source), and `iteration` (training step). Source details come directly from each search result.
 
 Configure retrieval with environment variables or `.env`:
 
@@ -115,13 +115,17 @@ Mock mode does not load `.env` and ignores environment-based configuration. It a
 
 Send messages through the chat input to continue a conversation. Select **Fact-check response** below any assistant response to check it. Only the selected response is decomposed; its preceding conversation history is supplied automatically as context for resolving references and omitted information.
 
+Each reply displays the Chatbot model or Azure deployment name used to generate it, including during generation. The name is saved with the reply so it remains consistent if the model configuration changes. Mock responses display **Mock model**.
+
 Results remain associated with their response as the conversation continues. Claims, evidence, and verdicts are kept outside the chat history sent to the LLM. **New chat** clears the conversation and its verification results.
 
-The first fact-check starts immediately. Checking the same response again shows an inline confirmation: **Run again** replaces its existing results, while **Cancel** keeps them. The progress indicator disappears when the run ends. Expand **Evidence passage** to read a passage and **Source details** to see its source name and training step.
+The first fact-check starts immediately. Checking the same response again opens a confirmation modal: **Run again** replaces its existing results, while **Cancel**, the close button, or Escape keeps them. The progress indicator disappears when the run ends. Expand **Evidence passage** to read the passage together with its source name and training step.
+
+During a fact-check, its button changes to **Pause fact-check**. Pausing stops new requests from starting while retaining the current pipeline, progress, and intermediate results. Requests already sent may finish and their responses are retained for resumption. Select **Resume fact-check** to continue without repeating completed requests. The progress bar stays visible while paused; activity icons stop. **New chat** discards paused or running checks and cancels work that has not started.
 
 After decomposition, the Factchecker model assesses each claim independently in its own check-worthiness request. These requests run concurrently. Non-check-worthy claims remain visible with a skipped message and receive no verification verdict. If every claim is skipped, neither the tokenizer nor Elasticsearch is initialized. The app searches Elasticsearch concurrently for all check-worthy claims, then submits the individual claim–evidence verification requests concurrently across all claims. Tokenization and decoding happen on the calling thread. Results retain the original claim order and Elasticsearch evidence order. When retrieval returns no usable evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call.
 
-`--max-concurrency` (default: `8`) limits simultaneous HTTP requests in each of the check-worthiness, Elasticsearch retrieval, and verification stages; use `1` for sequential execution. These are parallel requests to Chat Completions and Elasticsearch, not asynchronous OpenAI Batch API jobs. Progress messages report completed claims, searches, or pairs as results are collected in input order. API and retrieval failures are reported as errors rather than verdicts. Completed claim results remain visible; queued work is cancelled on failure and already-running requests are allowed to finish.
+`--max-concurrency` (default: `8`) limits simultaneous HTTP requests in each of the check-worthiness, Elasticsearch retrieval, and verification stages; use `1` for sequential execution. These are parallel requests to Chat Completions and Elasticsearch, not asynchronous OpenAI Batch API jobs. The claim list appears immediately after decomposition. Check-worthiness decisions, retrieved passages and source details, and individual verification verdicts appear as each request finishes, without waiting for earlier claims or other evidence pairs. Claims and evidence stay in their original display positions. Progress counts completed work, regardless of completion order. API and retrieval failures are reported as errors rather than verdicts. Available intermediate results and completed verdicts remain visible after an error or interruption; queued work is cancelled on failure and already-running requests are allowed to finish.
 
 ## Replace prompts
 

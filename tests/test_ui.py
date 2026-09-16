@@ -9,6 +9,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -36,6 +37,8 @@ def event(stage, **kwargs):
         "total_claims": 0,
         "result": None,
         "claims": None,
+        "claim_update": None,
+        "progress": None,
     }
     fields.update(kwargs)
     return SimpleNamespace(**fields)
@@ -100,6 +103,22 @@ class ChatUITest(unittest.TestCase):
         self.assert_app_ok()
 
     def assert_app_ok(self):
+        # AppTest does not schedule timed fragment reruns; advance ready jobs explicitly.
+        for _ in range(100):
+            jobs = self.app.session_state.filtered_state.get("factcheck_jobs", {})
+            active = [
+                job
+                for response_id, job in jobs.items()
+                if self.app.session_state["factchecks"][response_id]["state"] == "running"
+            ]
+            if not active:
+                break
+            for job in active:
+                try:
+                    job.advance().result(timeout=3)
+                except (Exception, StopException):
+                    pass
+            self.app.run()
         self.assertEqual(len(self.app.exception), 0, [exc.value for exc in self.app.exception])
 
     def send(self, text, response="Tokyo is Japan's capital."):
@@ -118,7 +137,10 @@ class ChatUITest(unittest.TestCase):
         return self.app.session_state["factchecks"][message_id]
 
     def rendered_text(self):
-        return "\n".join(block.value for block in self.app.markdown)
+        return "\n".join(
+            [block.value for block in self.app.markdown]
+            + [block.proto.dialog.title for block in self.app.get("dialog") if block.proto.dialog.is_open]
+        )
 
     def assert_no_supplementary_sections(self):
         for expander in self.app.get("expander"):
@@ -128,6 +150,7 @@ class ChatUITest(unittest.TestCase):
     def assert_processing_finished(self):
         self.assertEqual(len(self.app.get("progress")), 0)
         self.assertEqual(len(self.app.get("status")), 0)
+        self.assertNotIn('class="claim-spinner"', self.rendered_text())
 
     def test_initial_page_is_english_and_loads_no_models(self):
         self.pipeline.PipelineConfig.assert_not_called()
@@ -168,7 +191,8 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(len(passages), 1)
         self.assertFalse(passages[0].proto.expanded)
         self.assertIn("&lt;script&gt;unsafe&lt;/script&gt;", "\n".join(block.value for block in passages[0].markdown))
-        self.assertTrue(any(expander.label == "Source details" for expander in checked_message.expander))
+        self.assertFalse(any(expander.label == "Source details" for expander in checked_message.expander))
+        self.assertEqual([text.value for text in passages[0].text], ["Source: test dataset", "Training step: 123"])
         self.assertTrue(any("Fact-check results" in block.value for block in checked_message.markdown))
 
         self.send("Tell me more.", "Tokyo was formerly called Edo.")
@@ -280,6 +304,7 @@ class ChatUITest(unittest.TestCase):
         second_run = deepcopy(self.check(second["id"], claim_result(second["content"])))
         previous = self.check(first["id"], claim_result(first["content"], labels=["Refuted"]))
         self.assertEqual(previous, first_run)
+        self.assertTrue(self.app.get("dialog")[0].proto.dialog.is_open)
         self.assertEqual(self.pipeline.run_factcheck.call_count, 2)
         self.assertIn("Run fact-check again?", self.rendered_text())
         self.app.button(key=f"confirm_factcheck_{first['id']}").click().run()
@@ -327,6 +352,9 @@ class ChatUITest(unittest.TestCase):
 
         self.app.button(key=f"cancel_factcheck_{message['id']}").click().run()
         self.assert_app_ok()
+        # Refresh AppTest's event-block tree after the dialog fragment closes.
+        self.app.run()
+        self.assert_app_ok()
         self.assertFalse(self.app.session_state.filtered_state.get("recheck_confirmation"))
         self.assertFalse(self.app.session_state.filtered_state.get("pending_factcheck"))
         self.assertNotIn("Run fact-check again?", self.rendered_text())
@@ -373,10 +401,7 @@ class ChatUITest(unittest.TestCase):
         self.assertIn("&lt;script&gt;unsafe&lt;/script&gt;", content)
         self.assertNotIn("<script>unsafe</script>", content)
         self.assertEqual(len(self.app.json), 0)
-        sources = [expander for expander in self.app.expander if expander.label == "Source details"]
-        self.assertEqual(len(sources), 5)
-        for source in sources:
-            self.assertEqual([text.value for text in source.text], ["Source: test dataset", "Training step: 123"])
+        self.assertFalse(any(expander.label == "Source details" for expander in self.app.expander))
         visible = content + "\n" + "\n".join(text.value for text in self.app.text)
         visible += "\n" + "\n".join(caption.value for caption in self.app.caption)
         self.assertNotIn("Relevance score", visible)
@@ -385,6 +410,8 @@ class ChatUITest(unittest.TestCase):
         self.assertNotIn("meta", evidence)
         passages = [expander for expander in self.app.expander if expander.label == "Evidence passage"]
         self.assertEqual(len(passages), 5)
+        for passage in passages:
+            self.assertEqual([text.value for text in passage.text], ["Source: test dataset", "Training step: 123"])
         self.assertTrue(all(not passage.proto.expanded for passage in passages))
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
@@ -481,6 +508,128 @@ class ChatUITest(unittest.TestCase):
         self.assert_processing_finished()
         self.pipeline.run_factcheck.assert_called_once()
 
+    def test_claim_list_is_visible_immediately_after_decomposition(self):
+        def paused_events(*args):
+            yield event("decomposition", claims=["First extracted claim", "Second extracted claim"], total_claims=2)
+            raise StopException()
+
+        self.send("Tell me two facts.", "Response to check")
+        self.pipeline.run_factcheck.side_effect = paused_events
+        run = self.check(self.assistants()[0]["id"])
+        self.assertEqual(run["results"], [])
+        self.assertEqual(run["state"], "running")
+        text = self.rendered_text()
+        self.assertLess(text.index("First extracted claim"), text.index("Second extracted claim"))
+        self.assertIn("0 / 2 claims processed", text)
+        self.assertEqual(text.count('class="claim-spinner"'), 2)
+        self.assertEqual(sum(c.value == "Assessing check-worthiness…" for c in self.app.caption), 2)
+        self.assertNotIn('class="verdict', text)
+
+    def test_pause_keeps_results_and_resume_continues_the_same_pipeline(self):
+        started = Event()
+        release = Event()
+        result = claim_result("Claim retained while paused")
+
+        def delayed_events(*args):
+            yield event("decomposition", claims=[result["claim"]], total_claims=1)
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError("The in-flight operation was not released")
+            yield event("claim_complete", current_claim=1, total_claims=1, result=result)
+            yield event("complete", current_claim=1, total_claims=1)
+
+        self.send("Tell me a fact.")
+        response_id = self.assistants()[0]["id"]
+        self.pipeline.run_factcheck.side_effect = delayed_events
+        try:
+            self.app.button(key=f"factcheck_{response_id}").click().run()
+            for _ in range(10):
+                if started.wait(0.02):
+                    break
+                self.app.run()
+            self.assertTrue(started.is_set())
+            self.app.button(key=f"pause_factcheck_{response_id}").click().run()
+            self.assert_app_ok()
+            run = self.app.session_state["factchecks"][response_id]
+            self.assertEqual(run["state"], "paused")
+            self.assertEqual(run["claims"], [result["claim"]])
+            self.assertEqual(run["results"], [])
+            self.assertEqual(len(self.app.get("progress")), 1)
+            self.assertNotIn('class="claim-spinner"', self.rendered_text())
+            self.assertNotIn('class="progress-spinner"', self.rendered_text())
+            snapshot = deepcopy(run)
+            release.set()
+            job = self.app.session_state["factcheck_jobs"][response_id]
+            job.advance().result(timeout=2)
+            self.app.run()
+            self.assertEqual(self.app.session_state["factchecks"][response_id], snapshot)
+            self.app.button(key=f"resume_factcheck_{response_id}").click().run()
+            self.assert_app_ok()
+            run = self.app.session_state["factchecks"][response_id]
+            self.assertEqual(run["state"], "complete")
+            self.assertEqual(run["results"], [result])
+            self.assertFalse(self.app.session_state["factcheck_jobs"])
+            self.assertFalse(self.app.session_state.filtered_state.get("recheck_confirmation"))
+            self.pipeline.run_factcheck.assert_called_once()
+            self.assert_processing_finished()
+        finally:
+            release.set()
+            for job in self.app.session_state.filtered_state.get("factcheck_jobs", {}).values():
+                job.close()
+
+    def test_retrieved_evidence_is_visible_before_any_verification_finishes(self):
+        result = claim_result("Retrieved claim")
+        result["status"] = "verification"
+        del result["evidences"][0]["verification"]
+
+        def paused_events(*args):
+            yield event("decomposition", claims=[result["claim"]], total_claims=1)
+            yield event("retrieval", current_claim=1, total_claims=1, claim_update=result, progress=0.5)
+            raise StopException()
+
+        self.send("Tell me a fact.", "Response to check")
+        self.pipeline.run_factcheck.side_effect = paused_events
+        run = self.check(self.assistants()[0]["id"])
+        self.assertEqual(run["results"], [])
+        self.assertEqual([e.label for e in self.app.expander], ["Evidence passage"])
+        self.assertTrue(any(c.value == "Waiting for verification…" for c in self.app.caption))
+        self.assertIn("Source: test dataset", [t.value for t in self.app.text])
+        self.assertIn("Training step: 123", [t.value for t in self.app.text])
+        self.assertNotIn('class="verdict', self.rendered_text())
+
+        self.assertEqual(self.rendered_text().count('class="claim-spinner"'), 1)
+
+    def test_partial_pair_verdict_and_later_claim_survive_failure_in_original_positions(self):
+        partial = claim_result("First claim", ["Supported", "Refuted"])
+        partial["status"] = "verification"
+        del partial["evidences"][0]["verification"]
+        finished = claim_result("Second claim")
+
+        def failing_events(*args):
+            yield event("decomposition", claims=["First claim", "Second claim"], total_claims=2)
+            yield event("claim_complete", current_claim=2, total_claims=2, result=finished)
+            yield event("verification", current_claim=1, total_claims=2, claim_update=partial, progress=0.8)
+            raise RuntimeError("Remaining verification failed")
+
+        self.send("Tell me two facts.", "Response to check")
+        self.pipeline.run_factcheck.side_effect = failing_events
+        run = self.check(self.assistants()[0]["id"])
+        self.assertEqual(run["results"], [finished])
+        self.assertEqual(run["claim_states"], [partial, finished])
+        text = self.rendered_text()
+        self.assertLess(text.index("First claim"), text.index("Second claim"))
+        self.assertIn("1 / 2 claims processed", text)
+        self.assertIn("Refuted", text)
+        self.assertIn("Supported", text)
+        self.assertTrue(any(c.value == "Verification did not complete." for c in self.app.caption))
+        self.assertEqual(sum(e.label == "Evidence passage" for e in self.app.expander), 3)
+        self.assert_processing_finished()
+        self.app.run()
+        self.assert_app_ok()
+        self.assertEqual(
+            self.app.session_state["factchecks"][self.assistants()[0]["id"]]["claim_states"], [partial, finished]
+        )
+
     def test_interrupted_factcheck_requires_confirmation_before_retry(self):
         def interrupted_events(*_args, **_kwargs):
             yield event("decomposition", claims=["A claim"], total_claims=1)
@@ -491,6 +640,7 @@ class ChatUITest(unittest.TestCase):
         self.pipeline.run_factcheck.side_effect = interrupted_events
         interrupted = deepcopy(self.check(message["id"]))
         self.assertEqual(interrupted["state"], "running")
+        interrupted["state"] = "interrupted"
         self.app.run()
         self.assert_app_ok()
         self.assert_processing_finished()
@@ -799,7 +949,10 @@ class ChatUITest(unittest.TestCase):
                 chat_call = self.chat.stream_chat_response.call_args
                 model = chat_call.kwargs.get("model") or chat_call.args[1]
                 self.assertEqual(model, expected_chat_engine)
+                self.assertEqual(self.assistants()[0]["model"], expected_chat_engine)
+                self.assertIn(f'<div class="message-author">{expected_chat_engine}</div>', self.rendered_text())
                 self.check(self.assistants()[0]["id"], claim_result())
+                self.assertIn(f'<div class="message-author">{expected_chat_engine}</div>', self.rendered_text())
                 config = self.pipeline.run_factcheck.call_args.args[2]
                 self.assertEqual(config.engine, expected_engine)
 

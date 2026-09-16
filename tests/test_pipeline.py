@@ -37,10 +37,16 @@ class PipelineTests(unittest.TestCase):
     def hit(token_ids="1 2", dataset="test-corpus", training_step=10):
         return {"_source": {"token_ids": token_ids, "dataset_name": dataset, "iteration": training_step}}
 
+    @staticmethod
+    def results_in_claim_order(events):
+        return [
+            event.result for event in sorted(events, key=lambda event: event.current_claim) if event.result is not None
+        ]
+
     def test_verifies_every_pair_separately_and_preserves_evidence_association(self):
         self.search.return_value = [self.hit(training_step=0), self.hit("3 4", "second-corpus", 20)]
         events = list(run_factcheck("生成文", "文脈", self.config))
-        results = [event.result for event in events if event.stage == "claim_complete"]
+        results = self.results_in_claim_order(events)
         self.assertEqual(len(results), 2)
         self.assertEqual(self.verify.call_count, 4)
         self.verify.assert_has_calls(
@@ -81,7 +87,7 @@ class PipelineTests(unittest.TestCase):
             self.tokenizer.encode.call_args_list,
             [call(claim, add_special_tokens=False) for claim in ["クレーム A", "クレーム B"]],
         )
-        self.assertEqual(self.tokenizer.decode.call_args_list, [call([1, 2]), call([3, 4])] * 2)
+        self.assertCountEqual(self.tokenizer.decode.call_args_list, [call([1, 2]), call([3, 4])] * 2)
         self.decompose.assert_called_once_with(
             "生成文", model=self.config.engine, context="文脈", prompt_path=self.config.decomposition_prompt
         )
@@ -120,7 +126,7 @@ class PipelineTests(unittest.TestCase):
         self.checkworthy.side_effect = lambda claim, **kwargs: claim == "Factual claim"
         self.search.return_value = [self.hit()]
         events = list(run_factcheck("Response", None, self.config))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual([result["claim"] for result in results], self.decompose.return_value)
         self.assertEqual([result["is_checkworthy"] for result in results], [False, True, False])
         self.search.assert_called_once()
@@ -138,7 +144,7 @@ class PipelineTests(unittest.TestCase):
         self.checkworthy.return_value = False
         events = list(run_factcheck("Response", None, self.config))
         self.assertEqual(events[-1].stage, "complete")
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual(len(results), 2)
         self.assertTrue(all(result["is_checkworthy"] is False for result in results))
         self.assertNotIn("preparation", [event.stage for event in events])
@@ -188,7 +194,7 @@ class PipelineTests(unittest.TestCase):
         self.tokenizer.decode.side_effect = decode
         self.search.side_effect = search
         events = list(run_factcheck("Response", None, replace(self.config, max_concurrency=2)))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual(completion_order, ["20", "10"])
         self.assertEqual([result["claim"] for result in results], self.decompose.return_value)
         self.assertEqual(self.search.call_count, 2)
@@ -222,7 +228,7 @@ class PipelineTests(unittest.TestCase):
     def test_no_evidence_is_explicit_and_does_not_invoke_verifier(self):
         self.search.return_value = []
         events = list(run_factcheck("生成文", None, self.config))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual(len(results), 2)
         self.assertTrue(all(result["no_evidence"] and not result["evidences"] for result in results))
         self.verify.assert_not_called()
@@ -234,7 +240,7 @@ class PipelineTests(unittest.TestCase):
                 self.search.return_value = [self.hit(str(index)) for index in range(count)]
                 self.verify.reset_mock()
                 events = list(run_factcheck("Response", None, PipelineConfig(num_evidences=count)))
-                results = [event.result for event in events if event.result is not None]
+                results = self.results_in_claim_order(events)
                 self.assertEqual(self.search.call_args.kwargs["size"], count)
                 self.assertEqual(len(results[0]["evidences"]), count)
                 self.assertEqual(self.verify.call_count, count)
@@ -258,7 +264,7 @@ class PipelineTests(unittest.TestCase):
         self.tokenizer.decode.side_effect = None
         self.tokenizer.decode.return_value = " \n "
         events = list(run_factcheck("Response", None, self.config))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertTrue(all(result["no_evidence"] and not result["evidences"] for result in results))
         self.verify.assert_not_called()
 
@@ -290,6 +296,79 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PipelineConfig(max_concurrency=0)
 
+    def test_each_stage_emits_ready_updates_without_waiting_for_an_earlier_request(self):
+        for stage in ["checkworthiness", "retrieval", "verification"]:
+            with self.subTest(stage=stage):
+                self.decompose.return_value = ["First claim", "Second claim"]
+                release_first = Event()
+                self.tokenizer.encode.side_effect = lambda claim, **kwargs: [1 if claim == "First claim" else 3]
+
+                def wait_for_display():
+                    if not release_first.wait(2):
+                        raise TimeoutError("A completed request was held behind an earlier request")
+
+                def check(claim, **kwargs):
+                    if stage == "checkworthiness" and claim == "First claim":
+                        wait_for_display()
+                    return True
+
+                def search(*args, body, **kwargs):
+                    if stage == "retrieval" and body["query"]["match"]["token_ids"] == "1":
+                        wait_for_display()
+                    return [self.hit(), self.hit("3 4")]
+
+                def verify(claim, passage, **kwargs):
+                    if stage == "verification" and claim == "First claim" and passage == "短文":
+                        wait_for_display()
+                    return self.verdict(claim, passage)
+
+                self.checkworthy.side_effect = check
+                self.search.side_effect = search
+                self.verify.side_effect = verify
+                stream = run_factcheck("Response", None, replace(self.config, max_concurrency=4))
+                events = []
+                try:
+                    for update in stream:
+                        events.append(update)
+                        if update.stage == stage and update.current_claim == 2:
+                            self.assertIsNotNone(update.claim_update)
+                            if stage == "retrieval":
+                                self.assertEqual(len(update.claim_update["evidences"]), 2)
+                                self.assertNotIn("verification", update.claim_update["evidences"][0])
+                            break
+                    else:
+                        self.fail("No intermediate update was emitted")
+                finally:
+                    release_first.set()
+                events.extend(stream)
+                self.assertEqual(len(self.results_in_claim_order(events)), 2)
+                self.assertEqual(events[-1].stage, "complete")
+                if stage == "retrieval":
+                    self.assertNotIn("verification", update.claim_update["evidences"][0])
+
+    def test_pair_verdict_is_emitted_while_other_evidence_for_same_claim_is_pending(self):
+        self.decompose.return_value = ["Claim"]
+        self.search.return_value = [self.hit(), self.hit("3 4")]
+        release_first = Event()
+
+        def verify(claim, passage, **kwargs):
+            if passage == "短文" and not release_first.wait(2):
+                raise TimeoutError("The second evidence verdict was not emitted immediately")
+            return self.verdict(claim, passage)
+
+        self.verify.side_effect = verify
+        stream = run_factcheck("Response", None, self.config)
+        try:
+            update = next(event for event in stream if event.stage == "verification" and event.claim_update is not None)
+            self.assertIsNone(update.result)
+            self.assertNotIn("verification", update.claim_update["evidences"][0])
+            self.assertEqual(update.claim_update["evidences"][1]["verification"]["label"], "Refuted")
+        finally:
+            release_first.set()
+        remaining = list(stream)
+        self.assertEqual(len(self.results_in_claim_order(remaining)), 1)
+        self.assertNotIn("verification", update.claim_update["evidences"][0])
+
     def test_checkworthiness_runs_independently_in_parallel_and_preserves_labels(self):
         self.decompose.return_value = ["First claim", "Second claim"]
         second_finished = Event()
@@ -308,7 +387,7 @@ class PipelineTests(unittest.TestCase):
         self.checkworthy.side_effect = check
         self.search.return_value = [self.hit()]
         events = list(run_factcheck("Response", None, replace(self.config, max_concurrency=2)))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual(completion_order, ["Second claim", "First claim"])
         self.assertEqual([result["claim"] for result in results], self.decompose.return_value)
         self.assertEqual([result["is_checkworthy"] for result in results], [False, True])
@@ -341,7 +420,7 @@ class PipelineTests(unittest.TestCase):
         self.verify.side_effect = verify
         events = list(run_factcheck("Response", None, replace(self.config, max_concurrency=4)))
         self.assertEqual(completion_order[0], ("Second claim", "長い根拠の文章"))
-        results = [event.result for event in events if event.result is not None]
+        results = self.results_in_claim_order(events)
         self.assertEqual([result["claim"] for result in results], self.decompose.return_value)
         for result in results:
             self.assertEqual([evidence["passage"] for evidence in result["evidences"]], ["短文", "長い根拠の文章"])
@@ -352,8 +431,12 @@ class PipelineTests(unittest.TestCase):
         self.decompose.return_value = ["First claim", "Second claim"]
         self.search.return_value = [self.hit()]
 
+        first_displayed = Event()
+
         def verify(claim, passage, **kwargs):
             if claim == "Second claim":
+                if not first_displayed.wait(2):
+                    raise TimeoutError("First completed claim was not emitted")
                 raise RuntimeError("Verification failed")
             return {"label": "Supported", "rationale": "Completed first claim"}
 
@@ -363,6 +446,7 @@ class PipelineTests(unittest.TestCase):
             for event in run_factcheck("Response", None, self.config):
                 if event.result is not None:
                     completed.append(event.result)
+                    first_displayed.set()
         self.assertEqual([result["claim"] for result in completed], ["First claim"])
         self.assertEqual(completed[0]["evidences"][0]["verification"]["label"], "Supported")
 

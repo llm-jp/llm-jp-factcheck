@@ -7,8 +7,6 @@ from contextlib import closing
 
 from clients import get_client
 
-SYSTEM_PROMPT = "You are a helpful assistant."
-
 
 def stream_chat_response(messages: list[dict], model: str) -> Iterator[str]:
     """Yield reply fragments, succeeding only for a complete, nonempty reply.
@@ -20,7 +18,7 @@ def stream_chat_response(messages: list[dict], model: str) -> Iterator[str]:
         raise ValueError("Chat history must be a nonempty list of messages.")
     if not isinstance(model, str) or not model.strip():
         raise ValueError("A model name or Azure deployment is required.")
-    payload = [{"role": "system", "content": SYSTEM_PROMPT}]
+    payload = []
     for message in messages:
         if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
             raise ValueError("Chat messages must have a user or assistant role.")

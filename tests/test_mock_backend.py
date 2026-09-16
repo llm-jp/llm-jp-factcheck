@@ -26,10 +26,9 @@ class MockBackendTests(unittest.TestCase):
         return "".join(mock_backend.stream_mock_chat_response(self.messages if messages is None else messages, model))
 
     def results(self, document, count=1):
+        events = mock_backend.run_mock_factcheck(document, None, PipelineConfig(num_evidences=count))
         return [
-            event.result
-            for event in mock_backend.run_mock_factcheck(document, None, PipelineConfig(num_evidences=count))
-            if event.result is not None
+            event.result for event in sorted(events, key=lambda event: event.current_claim) if event.result is not None
         ]
 
     def test_chat_is_deterministic_fictional_and_tracks_user_turns(self):

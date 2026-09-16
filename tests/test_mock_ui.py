@@ -71,6 +71,18 @@ class MockModeUITest(unittest.TestCase):
                 blocked.assert_not_called()
 
     def assert_app_ok(self):
+        for _ in range(100):
+            jobs = self.app.session_state.filtered_state.get("factcheck_jobs", {})
+            active = [
+                job
+                for response_id, job in jobs.items()
+                if self.app.session_state["factchecks"][response_id]["state"] == "running"
+            ]
+            if not active:
+                break
+            for job in active:
+                job.advance().result(timeout=3)
+            self.app.run()
         self.assertEqual(len(self.app.exception), 0, [exception.value for exception in self.app.exception])
         self.assertEqual(len(self.app.error), 0, [error.value for error in self.app.error])
 

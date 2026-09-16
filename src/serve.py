@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import json
 import logging
 import os
+from concurrent.futures import wait
 from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
 
 from chat import stream_chat_response
+from jobs import FactcheckJob
 from pipeline import PipelineConfig, run_factcheck
 
 logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ def positive_integer(value: str) -> int:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Chat with a model and fact-check responses using independent Chatbot and Factchecker connections.",
+        description="Chat with an LLM and check its responses against evidence retrieved from its training data.",
         epilog=(
             "Configure OpenAI-compatible or Azure OpenAI endpoints with CHATBOT_* and FACTCHECKER_* "
             "environment variables."
@@ -122,9 +125,31 @@ def _badge(label: str) -> str:
     return f'<span class="verdict {class_name}">{_text(label)}</span>'
 
 
-def _render_result(result: dict, index: int) -> None:
+def _progress_message(message: str) -> str:
+    return (
+        '<div class="progress-message" role="status">'
+        '<span class="progress-spinner" aria-hidden="true"></span>'
+        f"<span>{_text(message)}</span></div>"
+    )
+
+
+def _render_result(result: dict, index: int, *, stopped: bool = False, paused: bool = False) -> None:
+    processing = (
+        not stopped
+        and not paused
+        and result.get("status") in {"checkworthiness", "retrieval", "verification"}
+        and result.get("is_checkworthy") is not False
+        and not result.get("no_evidence")
+    )
+    activity = (
+        '<span class="claim-activity" role="status">'
+        '<span class="claim-spinner" aria-hidden="true"></span>Processing</span>'
+        if processing
+        else ""
+    )
     st.markdown(
-        f'<div class="claim-heading"><span class="eyebrow">Claim {index}</span>'
+        f'<div class="claim-heading"><div class="claim-title-row">'
+        f'<span class="eyebrow">Claim {index}</span>{activity}</div>'
         f'<p class="claim-text">{_text(result["claim"])}</p></div>',
         unsafe_allow_html=True,
     )
@@ -138,22 +163,40 @@ def _render_result(result: dict, index: int) -> None:
             st.caption("No evidence was retrieved for this claim. No verification call was made.")
         return
 
+    if paused and result.get("status") != "complete":
+        st.caption("Paused")
+    elif result.get("status") in {"checkworthiness", "retrieval"}:
+        pending = {
+            "checkworthiness": "Assessing check-worthiness…",
+            "retrieval": "Check-worthy. Waiting for evidence search to complete…",
+        }
+        st.caption("Processing stopped before this claim was verified." if stopped else pending[result["status"]])
+
     for evidence_index, evidence in enumerate(result["evidences"], 1):
-        verification = evidence["verification"]
+        verification = evidence.get("verification")
         with st.container(border=True):
             st.markdown(f'<div class="eyebrow evidence-number">Evidence {evidence_index}</div>', unsafe_allow_html=True)
-            st.markdown(_badge(verification["label"]), unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="section-label">Rationale</div>'
-                f'<p class="rationale">{_text(verification["rationale"])}</p>',
-                unsafe_allow_html=True,
-            )
+            with st.container():
+                if verification is None:
+                    st.caption(
+                        "Verification did not complete."
+                        if stopped
+                        else "Verification paused."
+                        if paused
+                        else "Waiting for verification…"
+                    )
+                else:
+                    st.markdown(_badge(verification["label"]), unsafe_allow_html=True)
+                    st.markdown(
+                        f'<div class="section-label">Rationale</div>'
+                        f'<p class="rationale">{_text(verification["rationale"])}</p>',
+                        unsafe_allow_html=True,
+                    )
             with st.expander("Evidence passage", expanded=False):
                 st.markdown(
                     f'<div class="evidence-passage">{_text(evidence["passage"])}</div>',
                     unsafe_allow_html=True,
                 )
-            with st.expander("Source details"):
                 st.text(f"Source: {evidence.get('dataset') or 'Not available'}")
                 training_step = evidence.get("training_step")
                 st.text(f"Training step: {training_step if training_step is not None else 'Not available'}")
@@ -173,20 +216,23 @@ def _render_results(run: dict) -> None:
             f'<span class="results-count">{len(results)} / {len(claims)} claims processed</span></div>',
             unsafe_allow_html=True,
         )
-        st.caption("Each verdict applies to one claim–evidence pair.")
         if run.get("mock"):
             st.caption("Synthetic results for interface testing.")
-        # Keep sections at stable positions while results arrive. Streamlit reuses
-        # nested blocks during a run, so moving expanders can retain unrelated content.
+        # Keep every claim in its original position while individual results arrive.
         with st.container():
-            for index, result in enumerate(results, 1):
-                _render_result(result, index)
-        pending_message = st.empty()
-        if claims and not results and run.get("state") == "running":
-            pending_message.caption("Processing claims. Results will appear as they are ready.")
+            for index, result in enumerate(run.get("claim_states", results), 1):
+                with st.container():
+                    _render_result(
+                        result,
+                        index,
+                        stopped=run.get("state") in {"error", "interrupted"},
+                        paused=run.get("state") == "paused",
+                    )
 
 
 def _progress(event) -> float:
+    if event.progress is not None:
+        return event.progress
     if event.stage == "complete":
         return 1.0
     if event.stage == "decomposition":
@@ -203,7 +249,7 @@ def _progress(event) -> float:
     return 0.5
 
 
-def _run_factcheck(response: dict, preceding_messages: list[dict], args: argparse.Namespace, results_area) -> None:
+def _start_factcheck(response: dict, preceding_messages: list[dict], args: argparse.Namespace) -> None:
     # Snapshot only the conversation preceding this response, including its user prompt.
     context = json.dumps(
         [{"role": message["role"], "content": message["content"]} for message in preceding_messages],
@@ -215,8 +261,12 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
         "context": context,
         "claims": [],
         "results": [],
+        "claim_states": [],
         "state": "running",
         "error": None,
+        "progress": 0.0,
+        "message": "Extracting claims from this response…",
+        "completed_results": {},
     }
     factcheck = run_factcheck
     if args.mock:
@@ -225,116 +275,160 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
         factcheck = run_mock_factcheck
         run["mock"] = True
     st.session_state["factchecks"][response["id"]] = run
-    with st.status("Extracting claims from this response…", expanded=True) as status:
-        progress = st.progress(0.0)
-        message = st.empty()
-        message.caption(
-            "Simulating decomposition, check-worthiness, retrieval, and verification with synthetic data."
-            if args.mock
-            else "Decomposition → check-worthiness → retrieval → verification. Initial tokenizer loading may take some time."
+    try:
+        config = PipelineConfig(
+            engine=args.engine,
+            tokenizer_name=args.tokenizer_name,
+            es_host=args.es_host,
+            es_dump_index=args.es_dump_index,
+            num_evidences=args.num_evidences,
+            max_concurrency=args.max_concurrency,
+            decomposition_prompt=args.decomposition_prompt,
+            checkworthiness_prompt=args.checkworthiness_prompt,
+            verification_prompt=args.verification_prompt,
         )
-        try:
-            config = PipelineConfig(
-                engine=args.engine,
-                tokenizer_name=args.tokenizer_name,
-                es_host=args.es_host,
-                es_dump_index=args.es_dump_index,
-                num_evidences=args.num_evidences,
-                max_concurrency=args.max_concurrency,
-                decomposition_prompt=args.decomposition_prompt,
-                checkworthiness_prompt=args.checkworthiness_prompt,
-                verification_prompt=args.verification_prompt,
-            )
-            complete = False
-            previous_progress = 0.0
-            for event in factcheck(run["document"], context, config):
-                status.update(label=event.message)
-                message.caption(event.message)
-                previous_progress = max(previous_progress, _progress(event))
-                progress.progress(previous_progress)
-                if event.claims is not None:
-                    run["claims"] = event.claims
-                if event.stage == "claim_complete" and event.result is not None:
-                    run["results"].append(event.result)
-                if event.claims is not None or event.stage == "claim_complete":
-                    with results_area.container():
-                        _render_results(run)
-                if event.stage == "complete":
-                    complete = True
-            if not complete:
-                raise RuntimeError("Fact-checking ended before completion. Please retry.")
-        except Exception as exc:
-            logger.exception("Fact-checking failed")
-            run["state"] = "error"
-            run["error"] = str(exc)
-        else:
-            run["state"] = "complete"
-        finally:
-            progress.empty()
+        st.session_state["factcheck_jobs"][response["id"]] = FactcheckJob(factcheck(run["document"], context, config))
+    except Exception as exc:
+        run["state"] = "error"
+        run["error"] = str(exc)
+
+
+def _run_factcheck(response_id: str, results_area) -> None:
+    run = st.session_state["factchecks"][response_id]
+    job = st.session_state["factcheck_jobs"][response_id]
+    try:
+        for _ in range(100):
+            future = job.advance()
+            # Drain quick intermediate events without waiting for the next UI tick.
+            if not future.done():
+                wait([future], timeout=0.005)
+            if not future.done():
+                break
+            try:
+                event = job.consume()
+            except StopIteration:
+                raise RuntimeError("Fact-checking ended before completion. Please retry.") from None
+            run["message"] = event.message
+            run["progress"] = max(run["progress"], _progress(event))
+            if event.claims is not None:
+                run["claims"] = event.claims
+                run["claim_states"] = [
+                    {"claim": claim, "status": "checkworthiness", "evidences": []} for claim in event.claims
+                ]
+            if event.claim_update is not None:
+                run["claim_states"][event.current_claim - 1] = event.claim_update
+            if event.stage == "claim_complete" and event.result is not None:
+                run["claim_states"][event.current_claim - 1] = event.result
+                run["completed_results"][event.current_claim - 1] = event.result
+                run["results"] = [run["completed_results"][index] for index in sorted(run["completed_results"])]
+            if event.claims is not None or event.claim_update is not None or event.stage == "claim_complete":
+                with results_area.container():
+                    _render_results(run)
+            if event.stage == "complete":
+                run["state"] = "complete"
+                break
+    except Exception as exc:
+        logger.exception("Fact-checking failed")
+        run["state"] = "error"
+        run["error"] = str(exc)
+    finally:
+        if run["state"] in {"complete", "error"} or (
+            job.pending is not None and job.pending.done() and job.pending.exception() is not None
+        ):
+            st.session_state["factcheck_jobs"].pop(response_id, None)
+            job.close()
 
 
 def _render_message(message: dict, index: int, args: argparse.Namespace) -> None:
     with st.chat_message(message["role"]):
-        _render_author(message["role"])
+        model = message.get("model") or ("Mock model" if args.mock else args.chat_engine or args.engine)
+        _render_author(message["role"], model)
         st.markdown(message["content"])
         if message["role"] == "assistant":
             _render_response_controls(message, index, args)
 
 
-def _render_author(role: str) -> None:
-    name = "You" if role == "user" else "Assistant"
-    st.markdown(f'<div class="message-author">{name}</div>', unsafe_allow_html=True)
+def _render_author(role: str, model: str) -> None:
+    name = "You" if role == "user" else model
+    st.markdown(f'<div class="message-author">{_text(name)}</div>', unsafe_allow_html=True)
 
 
 def _render_response_controls(message: dict, index: int, args: argparse.Namespace) -> None:
+    run = st.session_state["factchecks"].get(message["id"])
+    polling = (run and run["state"] == "running") or st.session_state.get("pending_factcheck") == message["id"]
+    st.fragment(run_every=0.25 if polling else None)(_response_controls)(message, index, args)
+
+
+def _response_controls(message: dict, index: int, args: argparse.Namespace) -> None:
     response_id = message["id"]
-    st.button(
-        "Fact-check response",
-        key=f"factcheck_{response_id}",
-        type="primary",
-        on_click=_request_factcheck,
-        args=(response_id,),
-    )
-    if st.session_state.get("recheck_confirmation") == response_id:
-        with st.container(border=True):
-            st.markdown('<div class="recheck-heading">Run fact-check again?</div>', unsafe_allow_html=True)
-            st.caption("This will replace the existing results for this response.")
-            confirm, cancel = st.columns(2)
-            with confirm:
-                st.button(
-                    "Run again",
-                    key=f"confirm_factcheck_{response_id}",
-                    type="primary",
-                    on_click=_confirm_factcheck,
-                    args=(response_id,),
-                )
-            with cancel:
-                st.button(
-                    "Cancel",
-                    key=f"cancel_factcheck_{response_id}",
-                    on_click=_cancel_factcheck,
-                    args=(response_id,),
-                )
-    activity_area = st.empty()
-    results_area = st.empty()
     if st.session_state.get("pending_factcheck") == response_id:
         st.session_state.pop("pending_factcheck")
-        with activity_area.container():
-            _run_factcheck(message, st.session_state["messages"][:index], args, results_area)
-    if response_id in st.session_state["factchecks"]:
-        run = st.session_state["factchecks"][response_id]
-        if run["state"] == "complete":
+        _start_factcheck(message, st.session_state["messages"][:index], args)
+    run = st.session_state["factchecks"].get(response_id)
+    if run and run["state"] in {"running", "paused"} and response_id not in st.session_state["factcheck_jobs"]:
+        run["state"] = "interrupted"
+    button_area = st.empty()
+    with button_area.container():
+        _factcheck_button(response_id)
+    activity_area = st.empty()
+    results_area = st.empty()
+    if run:
+        with results_area.container():
+            _render_results(run)
+        if run["state"] == "running":
+            _run_factcheck(response_id, results_area)
+            if run["state"] != "running":
+                st.rerun()
+        if run["state"] == "running":
+            with activity_area.container():
+                st.progress(run["progress"])
+                st.markdown(_progress_message(run["message"]), unsafe_allow_html=True)
+        elif run["state"] == "complete":
             activity_area.caption("Fact-check complete")
+        elif run["state"] == "paused":
+            with activity_area.container():
+                st.progress(run["progress"])
+                st.caption(
+                    "Fact-check paused. Requests already sent may finish; no new requests will start. Resume to continue."
+                )
         elif run["state"] == "error":
-            activity_area.error(f"Fact-checking failed: {run['error']}. Completed results have been retained.")
+            activity_area.error(f"Fact-checking failed: {run['error']}. Available results have been retained.")
         else:
-            activity_area.warning("This fact-check was interrupted. Completed results are shown below. You can retry.")
+            activity_area.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
         with results_area.container():
             _render_results(run)
 
 
+def _factcheck_button(response_id: str) -> None:
+    run = st.session_state["factchecks"].get(response_id)
+    state = run["state"] if run else None
+    if state == "running":
+        label, key, callback = "Pause fact-check", "pause_factcheck", _pause_factcheck
+    elif state == "paused":
+        label, key, callback = "Resume fact-check", "resume_factcheck", _resume_factcheck
+    else:
+        label, key, callback = "Fact-check response", "factcheck", _request_factcheck
+    if st.button(label, key=f"{key}_{response_id}", type="primary"):
+        callback(response_id)
+        st.rerun()
+
+
+def _pause_factcheck(response_id: str) -> None:
+    if job := st.session_state["factcheck_jobs"].get(response_id):
+        job.control.pause()
+        st.session_state["factchecks"][response_id]["state"] = "paused"
+
+
+def _resume_factcheck(response_id: str) -> None:
+    if job := st.session_state["factcheck_jobs"].get(response_id):
+        job.control.resume()
+        st.session_state["factchecks"][response_id]["state"] = "running"
+
+
 def _request_factcheck(response_id: str) -> None:
     """Run an initial check directly; require confirmation for an existing run."""
+    if response_id in st.session_state["factcheck_jobs"]:
+        return
     st.session_state.pop("pending_factcheck", None)
     if response_id in st.session_state["factchecks"]:
         st.session_state["recheck_confirmation"] = response_id
@@ -354,8 +448,28 @@ def _cancel_factcheck(response_id: str) -> None:
         st.session_state.pop("recheck_confirmation")
 
 
+def _dismiss_factcheck_confirmation() -> None:
+    st.session_state.pop("recheck_confirmation", None)
+
+
+@st.dialog("Run fact-check again?", on_dismiss=_dismiss_factcheck_confirmation)
+def _show_factcheck_confirmation(response_id: str) -> None:
+    st.write("This will replace the existing results for this response.")
+    confirm, cancel = st.columns(2)
+    with confirm:
+        if st.button("Run again", key=f"confirm_factcheck_{response_id}", type="primary", use_container_width=True):
+            _confirm_factcheck(response_id)
+            st.rerun()
+    with cancel:
+        if st.button("Cancel", key=f"cancel_factcheck_{response_id}", use_container_width=True):
+            _cancel_factcheck(response_id)
+            st.rerun()
+
+
 def _generate_response(args: argparse.Namespace) -> None:
     history = [{"role": message["role"], "content": message["content"]} for message in st.session_state["messages"]]
+    model = args.chat_engine or args.engine
+    display_model = "Mock model" if args.mock else model
     generate = stream_chat_response
     if args.mock:
         from mock_backend import stream_mock_chat_response
@@ -365,12 +479,12 @@ def _generate_response(args: argparse.Namespace) -> None:
     response_area = st.empty()
     with response_area.container():
         with st.chat_message("assistant"):
-            _render_author("assistant")
+            _render_author("assistant", display_model)
             output = st.empty()
             fragments = []
             try:
                 with st.spinner("Generating response…"):
-                    stream = generate(history, model=args.chat_engine or args.engine)
+                    stream = generate(history, model=model)
                     try:
                         for fragment in stream:
                             fragments.append(fragment)
@@ -386,7 +500,7 @@ def _generate_response(args: argparse.Namespace) -> None:
                 logger.exception("Response generation failed")
                 st.session_state["chat_error"] = str(exc)
             else:
-                message = {"id": uuid4().hex, "role": "assistant", "content": content}
+                message = {"id": uuid4().hex, "role": "assistant", "content": content, "model": display_model}
                 st.session_state["messages"].append(message)
                 output.markdown(content)
                 _render_response_controls(message, len(st.session_state["messages"]) - 1, args)
@@ -411,6 +525,9 @@ def _request_response() -> None:
 
 
 def _new_chat() -> None:
+    for job in st.session_state.get("factcheck_jobs", {}).values():
+        job.close()
+    st.session_state["factcheck_jobs"] = {}
     st.session_state["messages"] = []
     st.session_state["factchecks"] = {}
     st.session_state["chat_error"] = None
@@ -428,18 +545,18 @@ def main(args: argparse.Namespace) -> None:
     )
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("factchecks", {})
+    st.session_state.setdefault("factcheck_jobs", {})
     st.session_state.setdefault("chat_error", None)
 
+    logo = base64.b64encode(Path(__file__).with_name("assets").joinpath("llm-jp.png").read_bytes()).decode("ascii")
     heading, actions = st.columns([5, 1])
     with heading:
         st.markdown(
-            '<header class="app-header"><div class="app-brand"><span class="brand-symbol" aria-hidden="true">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
-            'stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M20 11V6a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3h1v3l4-3h2"/>'
-            '<path d="m15 15 2 2 4-5"/></svg></span>'
+            '<header class="app-header"><div class="app-brand">'
+            f'<img class="brand-symbol" src="data:image/png;base64,{logo}" alt="LLM-jp logo">'
             "<div><h1>LLM-jp Fact-Check</h1></div></div>"
-            '<p class="app-description">Chat with a language model and check its responses against evidence.</p></header>',
+            '<p class="app-description">Chat with an LLM and check its responses against evidence '
+            "from its training data.</p></header>",
             unsafe_allow_html=True,
         )
     with actions:
@@ -449,23 +566,29 @@ def main(args: argparse.Namespace) -> None:
         st.info("Mock mode: chat responses and fact-check results use synthetic data. No external services are called.")
 
     if not st.session_state["messages"]:
-        st.markdown(
-            '<section class="welcome-panel"><span class="welcome-icon" aria-hidden="true">'
-            '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" '
-            'stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M30 29H15l-7 6v-9a5 5 0 0 1-3-4V11a5 5 0 0 1 5-5h20a5 5 0 0 1 5 5v13a5 5 0 0 1-5 5Z"/>'
-            '<path d="M18 34v1a4 4 0 0 0 4 4h12l7 5V20a4 4 0 0 0-4-4M13 14h14M13 21h9"/>'
-            "</svg></span><h2>Start a conversation</h2>"
-            '<p class="welcome-description">Ask a question or explore a topic. '
-            "You can check any response to examine the claims it makes.</p>"
-            '<div class="workflow-grid">'
-            '<div class="workflow-step"><span class="step-number">01</span>'
-            "<div><h3>Discuss a topic</h3><p>Send a message below and continue with follow-up questions.</p></div></div>"
-            '<div class="workflow-step"><span class="step-number">02</span>'
-            "<div><h3>Check a response</h3><p>Select <strong>Fact-check response</strong> below a reply "
-            "to inspect its claims and evidence.</p></div></div></div></section>",
-            unsafe_allow_html=True,
-        )
+        # A nested chat input is inline; the conversation composer stays pinned below.
+        with st.container():
+            st.markdown(
+                '<section class="welcome-panel"><span class="welcome-icon" aria-hidden="true">'
+                '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7" '
+                'stroke-linecap="round" stroke-linejoin="round">'
+                '<path d="M30 29H15l-7 6v-9a5 5 0 0 1-3-4V11a5 5 0 0 1 5-5h20a5 5 0 0 1 5 5v13a5 5 0 0 1-5 5Z"/>'
+                '<path d="M18 34v1a4 4 0 0 0 4 4h12l7 5V20a4 4 0 0 0-4-4M13 14h14M13 21h9"/>'
+                "</svg></span><h2>Start a conversation</h2></section>",
+                unsafe_allow_html=True,
+            )
+            st.chat_input("Message the model", key="chat_input", on_submit=_submit_message)
+            if st.session_state.get("input_error"):
+                st.warning(st.session_state["input_error"])
+            st.markdown(
+                '<div class="workflow-grid">'
+                '<div class="workflow-step"><span class="step-number">01</span>'
+                "<div><h3>Discuss a topic</h3><p>Send a message and continue with follow-up questions.</p></div></div>"
+                '<div class="workflow-step"><span class="step-number">02</span>'
+                "<div><h3>Check a response</h3><p>Select <strong>Fact-check response</strong> to compare claims "
+                "with training data and inspect the evidence.</p></div></div></div>",
+                unsafe_allow_html=True,
+            )
     else:
         st.markdown('<h2 class="conversation-heading">Conversation</h2>', unsafe_allow_html=True)
     for index, message in enumerate(st.session_state["messages"]):
@@ -483,9 +606,13 @@ def main(args: argparse.Namespace) -> None:
     if st.session_state["chat_error"]:
         st.error(f"Response generation failed: {st.session_state['chat_error']}")
         st.button("Retry response", key="retry_response", on_click=_request_response)
-    if st.session_state.get("input_error"):
-        st.warning(st.session_state["input_error"])
-    st.chat_input("Message the model", key="chat_input", on_submit=_submit_message)
+    if st.session_state["messages"]:
+        if st.session_state.get("input_error"):
+            st.warning(st.session_state["input_error"])
+        st.chat_input("Message the model", key="chat_input", on_submit=_submit_message)
+
+    if response_id := st.session_state.get("recheck_confirmation"):
+        _show_factcheck_confirmation(response_id)
 
 
 if __name__ == "__main__":

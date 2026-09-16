@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache, partial
 from typing import Iterator
 
-from batching import request_batch
+from batching import completed_requests, request_batch
 from checkworthy import identify_checkworthiness
 from decompose import decompose_document_into_claims
 from retrieval import create_elasticsearch_client, search_documents
@@ -40,6 +41,22 @@ class PipelineEvent:
     total_claims: int = 0
     result: dict | None = None
     claims: list[str] | None = None
+    claim_update: dict | None = None
+    progress: float | None = None
+
+
+def claim_event(stage: str, message: str, index: int, results: list[dict], progress: float) -> PipelineEvent:
+    """Snapshot one claim so later updates cannot change an already emitted event."""
+    snapshot = deepcopy(results[index])
+    return PipelineEvent(
+        stage,
+        message,
+        index + 1,
+        len(results),
+        result=snapshot if stage == "claim_complete" else None,
+        claim_update=snapshot,
+        progress=progress,
+    )
 
 
 @lru_cache(maxsize=4)
@@ -83,14 +100,28 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
         partial(identify_checkworthiness, claim, model=config.engine, prompt_path=config.checkworthiness_prompt)
         for claim in claims
     ]
-    labels = []
+    results = [
+        {"claim": claim, "is_checkworthy": None, "evidences": [], "no_evidence": False, "status": "checkworthiness"}
+        for claim in claims
+    ]
     with request_batch(requests, config.max_concurrency) as futures:
-        for index, future in enumerate(futures, 1):
-            labels.append(future.result())
-            yield PipelineEvent(
-                "checkworthiness", f"Check-worthiness assessed: {index} / {total} claims.", index, total
+        for completed, (index, future) in enumerate(completed_requests(futures), 1):
+            result = results[index]
+            result["is_checkworthy"] = future.result()
+            result["status"] = "retrieval" if result["is_checkworthy"] else "complete"
+            progress = 0.05 + 0.15 * completed / total
+            yield claim_event(
+                "checkworthiness", f"Check-worthiness assessed: {completed} / {total} claims.", index, results, progress
             )
-    if any(labels):
+            if not result["is_checkworthy"]:
+                yield claim_event(
+                    "claim_complete",
+                    f"Claim {index + 1} / {total}: not check-worthy; retrieval and verification skipped.",
+                    index,
+                    results,
+                    progress,
+                )
+    if any(result["is_checkworthy"] for result in results):
         yield PipelineEvent(
             "preparation",
             "Preparing retrieval. The first run may require a tokenizer download…",
@@ -100,18 +131,15 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
         yield PipelineEvent("preparation", "Connecting to the evidence database…", total_claims=total)
         es = get_search_client(config.es_host)
 
-    results = [
-        {"claim": claim, "is_checkworthy": label, "evidences": [], "no_evidence": False}
-        for claim, label in zip(claims, labels, strict=True)
-    ]
-    search_targets = [(index, result) for index, result in enumerate(results, 1) if result["is_checkworthy"]]
+    search_targets = [index for index, result in enumerate(results) if result["is_checkworthy"]]
     if search_targets:
         yield PipelineEvent(
             "retrieval", f"Searching for evidence: 0 / {len(search_targets)} claims…", total_claims=total
         )
         requests = []
         # Keep tokenizer operations on the calling thread; workers only perform searches.
-        for _, result in search_targets:
+        for index in search_targets:
+            result = results[index]
             claim_token_ids = tokenizer.encode(result["claim"], add_special_tokens=False)
             requests.append(
                 partial(
@@ -124,7 +152,9 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
                 )
             )
         with request_batch(requests, config.max_concurrency) as futures:
-            for completed, ((index, result), future) in enumerate(zip(search_targets, futures, strict=True), 1):
+            for completed, (position, future) in enumerate(completed_requests(futures), 1):
+                index = search_targets[position]
+                result = results[index]
                 evidences = []
                 for hit in future.result():
                     source = hit["_source"]
@@ -139,42 +169,48 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
                         )
                 result["evidences"] = evidences
                 result["no_evidence"] = not evidences
-                yield PipelineEvent(
+                result["status"] = "verification" if evidences else "complete"
+                progress = 0.25 + 0.25 * completed / len(search_targets)
+                yield claim_event(
                     "retrieval",
                     f"Evidence searches completed: {completed} / {len(search_targets)} claims.",
                     index,
-                    total,
+                    results,
+                    progress,
                 )
+                if not evidences:
+                    yield claim_event(
+                        "claim_complete", f"Claim {index + 1} / {total}: no evidence found.", index, results, progress
+                    )
 
+    pairs = [(index, evidence) for index, result in enumerate(results) for evidence in result["evidences"]]
     requests = [
         partial(
             verify_claim,
-            result["claim"],
+            results[index]["claim"],
             evidence["passage"],
             model=config.engine,
             prompt_path=config.verification_prompt,
         )
-        for result in results
-        for evidence in result["evidences"]
+        for index, evidence in pairs
     ]
     if requests:
         yield PipelineEvent("verification", f"Verifying claim–evidence pairs: 0 / {len(requests)}…", total_claims=total)
     with request_batch(requests, config.max_concurrency) as futures:
-        pending = iter(futures)
-        completed_pairs = 0
-        for index, result in enumerate(results, 1):
-            for evidence in result["evidences"]:
-                evidence["verification"] = next(pending).result()
-                completed_pairs += 1
-                yield PipelineEvent(
-                    "verification", f"Verified claim–evidence pairs: {completed_pairs} / {len(requests)}.", index, total
+        for completed, (position, future) in enumerate(completed_requests(futures), 1):
+            index, evidence = pairs[position]
+            evidence["verification"] = future.result()
+            result = results[index]
+            finished = all("verification" in item for item in result["evidences"])
+            if finished:
+                result["status"] = "complete"
+            progress = 0.5 + 0.48 * completed / len(pairs)
+            yield claim_event(
+                "verification", f"Verified claim–evidence pairs: {completed} / {len(pairs)}.", index, results, progress
+            )
+            if finished:
+                yield claim_event(
+                    "claim_complete", f"Claim {index + 1} / {total}: verification complete.", index, results, progress
                 )
-            if not result["is_checkworthy"]:
-                message = "not check-worthy; retrieval and verification skipped."
-            elif result["no_evidence"]:
-                message = "no evidence found."
-            else:
-                message = "verification complete."
-            yield PipelineEvent("claim_complete", f"Claim {index} / {total}: {message}", index, total, result=result)
 
     yield PipelineEvent("complete", f"Fact-check complete. Claims processed: {total}.", total, total)
