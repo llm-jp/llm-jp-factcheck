@@ -76,6 +76,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=1)
     parser.add_argument("--decomposition-prompt", "--decomposition_prompt", default=None)
+    parser.add_argument("--checkworthiness-prompt", "--checkworthiness_prompt", default=None)
     parser.add_argument("--verification-prompt", "--verification_prompt", default=None)
     parser.add_argument(
         "--mock",
@@ -120,6 +121,10 @@ def _render_result(result: dict, index: int) -> None:
         f'<p class="claim-text">{_text(result["claim"])}</p></div>',
         unsafe_allow_html=True,
     )
+    if result.get("is_checkworthy") is False:
+        with st.container(border=True):
+            st.caption("Not check-worthy. Retrieval and verification were skipped.")
+        return
     if result.get("no_evidence"):
         with st.container(border=True):
             st.markdown(_badge("Not enough information"), unsafe_allow_html=True)
@@ -158,7 +163,7 @@ def _render_results(run: dict) -> None:
     with st.container(border=True):
         st.markdown(
             '<div class="results-header"><h3 class="results-heading">Fact-check results</h3>'
-            f'<span class="results-count">{len(results)} / {len(claims)} claims checked</span></div>',
+            f'<span class="results-count">{len(results)} / {len(claims)} claims processed</span></div>',
             unsafe_allow_html=True,
         )
         st.caption("Each verdict applies to one claim–evidence pair.")
@@ -171,7 +176,7 @@ def _render_results(run: dict) -> None:
                 _render_result(result, index)
         pending_message = st.empty()
         if claims and not results and run.get("state") == "running":
-            pending_message.caption("Retrieving evidence. Results will appear as claims are checked.")
+            pending_message.caption("Processing claims. Results will appear as they are ready.")
 
 
 def _progress(event) -> float:
@@ -179,6 +184,8 @@ def _progress(event) -> float:
         return 1.0
     if event.stage == "decomposition":
         return 0.03
+    if event.stage == "checkworthiness":
+        return 0.08
     if event.stage == "preparation":
         return 0.12
     if event.total_claims:
@@ -214,9 +221,9 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
         progress = st.progress(0.0)
         message = st.empty()
         message.caption(
-            "Simulating decomposition, evidence retrieval, and verification with synthetic data."
+            "Simulating decomposition, check-worthiness, retrieval, and verification with synthetic data."
             if args.mock
-            else "Decomposition → evidence retrieval → verification. Initial tokenizer loading may take some time."
+            else "Decomposition → check-worthiness → retrieval → verification. Initial tokenizer loading may take some time."
         )
         try:
             config = PipelineConfig(
@@ -226,6 +233,7 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
                 es_dump_index=args.es_dump_index,
                 num_evidences=args.num_evidences,
                 decomposition_prompt=args.decomposition_prompt,
+                checkworthiness_prompt=args.checkworthiness_prompt,
                 verification_prompt=args.verification_prompt,
             )
             complete = False

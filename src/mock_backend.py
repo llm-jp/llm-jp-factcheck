@@ -11,6 +11,7 @@ from pipeline import PipelineConfig, PipelineEvent
 CHAT_INITIAL_DELAY = 1.0
 CHAT_CHUNK_DELAY = 0.08
 DECOMPOSITION_DELAY = 1.0
+CHECKWORTHINESS_DELAY = 0.6
 PREPARATION_DELAY = 0.4
 RETRIEVAL_STAGE_DELAY = 0.4
 VERIFICATION_DELAY = 0.6
@@ -20,8 +21,9 @@ VERIFICATION_DELAY = 0.6
 class _Fixture:
     claim: str
     label: str
-    passages: tuple[str, str]
+    passages: tuple[str, ...]
     rationale: str
+    is_checkworthy: bool = True
 
 
 _FIXTURES = (
@@ -70,6 +72,7 @@ _FIXTURES = (
         ),
         "The sample describes visitor facilities and provides no information about the museum's director.",
     ),
+    _Fixture("Northstar Museum is wonderful.", "", (), "", is_checkworthy=False),
 )
 
 MOCK_CLAIMS = tuple(fixture.claim for fixture in _FIXTURES)
@@ -115,10 +118,28 @@ def run_mock_factcheck(document: str, context: str | None, config: PipelineConfi
     if not fixtures:
         yield PipelineEvent("complete", "No recognized sample claims in this response.", claims=[])
         return
-    yield PipelineEvent("preparation", "Preparing bundled mock evidence…", total_claims=total)
-    sleep(PREPARATION_DELAY)
+    yield PipelineEvent("checkworthiness", "Identifying check-worthy sample claims…", total_claims=total)
+    sleep(CHECKWORTHINESS_DELAY)
+    if any(fixture.is_checkworthy for fixture in fixtures):
+        yield PipelineEvent("preparation", "Preparing bundled mock evidence…", total_claims=total)
+        sleep(PREPARATION_DELAY)
     for index, fixture in enumerate(fixtures, 1):
         prefix = f"Sample claim {index} / {total}"
+        if not fixture.is_checkworthy:
+            yield PipelineEvent(
+                "claim_complete",
+                f"{prefix}: not check-worthy; retrieval and verification skipped.",
+                index,
+                total,
+                result={
+                    "claim": fixture.claim,
+                    "is_checkworthy": False,
+                    "evidences": [],
+                    "no_evidence": False,
+                    "mock": True,
+                },
+            )
+            continue
         yield PipelineEvent("retrieval", f"{prefix}: selecting mock evidence…", index, total)
         sleep(RETRIEVAL_STAGE_DELAY)
         evidences = []
@@ -143,6 +164,12 @@ def run_mock_factcheck(document: str, context: str | None, config: PipelineConfi
             f"{prefix}: sample verification complete.",
             index,
             total,
-            result={"claim": fixture.claim, "evidences": evidences, "no_evidence": False, "mock": True},
+            result={
+                "claim": fixture.claim,
+                "is_checkworthy": True,
+                "evidences": evidences,
+                "no_evidence": False,
+                "mock": True,
+            },
         )
     yield PipelineEvent("complete", f"Sample fact-check complete. Claims processed: {total}.", total, total)

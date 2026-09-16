@@ -44,6 +44,7 @@ def event(stage, **kwargs):
 def claim_result(claim="Tokyo is Japan's capital.", labels=None):
     return {
         "claim": claim,
+        "is_checkworthy": True,
         "no_evidence": False,
         "evidences": [
             {
@@ -61,6 +62,7 @@ def completed_events(result):
     return iter(
         [
             event("decomposition", claims=[result["claim"]], total_claims=1),
+            event("checkworthiness", total_claims=1),
             event("preparation", total_claims=1),
             event("retrieval", current_claim=1, total_claims=1),
             event("verification", current_claim=1, total_claims=1),
@@ -555,6 +557,37 @@ class ChatUITest(unittest.TestCase):
         self.assert_processing_finished()
         self.assertFalse(any(expander.label == "Source details" for expander in self.app.get("expander")))
 
+    def test_non_checkworthy_claim_is_shown_as_skipped_without_verdict(self):
+        with patch.object(sys, "argv", [str(APP), "--checkworthiness-prompt", "custom-checkworthy.json"]):
+            self.app = AppTest.from_file(str(APP), default_timeout=10).run()
+            self.send("Your opinion?", "The museum is wonderful.")
+            message = self.assistants()[0]
+            skipped = {"claim": message["content"], "is_checkworthy": False, "no_evidence": False, "evidences": []}
+            run = self.check(message["id"], skipped)
+            self.assertEqual(run["state"], "complete")
+            self.assertEqual(run["results"], [skipped])
+            self.assertTrue(any("Not check-worthy" in caption.value for caption in self.app.caption))
+            self.assertNotIn('class="verdict', self.rendered_text())
+            self.assertIn("1 / 1 claims processed", self.rendered_text())
+            self.assertEqual(len(self.app.expander), 0)
+            self.assert_processing_finished()
+            config = self.pipeline.run_factcheck.call_args.args[2]
+            self.assertEqual(config.checkworthiness_prompt, "custom-checkworthy.json")
+
+    def test_checkworthiness_failure_is_reported_and_removes_progress(self):
+        def failing_events(*args):
+            yield event("decomposition", claims=["A claim"], total_claims=1)
+            yield event("checkworthiness", total_claims=1)
+            raise ValueError("Invalid check-worthiness labels")
+
+        self.pipeline.run_factcheck.side_effect = failing_events
+        self.send("Tell me a fact.")
+        run = self.check(self.assistants()[0]["id"])
+        self.assertEqual(run["state"], "error")
+        self.assertEqual(run["results"], [])
+        self.assertTrue(any("Invalid check-worthiness labels" in error.value for error in self.app.error))
+        self.assert_processing_finished()
+
     def test_empty_decomposition_is_explained(self):
         self.send("Hello", "Hello there!")
         message = self.assistants()[0]
@@ -592,6 +625,8 @@ class ChatUITest(unittest.TestCase):
             [
                 "--decomposition-prompt",
                 "decompose.json",
+                "--checkworthiness-prompt",
+                "checkworthy.json",
                 "--verification-prompt",
                 "verify.json",
                 "--chat-engine",
@@ -599,6 +634,7 @@ class ChatUITest(unittest.TestCase):
             ]
         )
         self.assertEqual(args.decomposition_prompt, "decompose.json")
+        self.assertEqual(args.checkworthiness_prompt, "checkworthy.json")
         self.assertEqual(args.verification_prompt, "verify.json")
         self.assertEqual(args.chat_engine, "chat-model")
         with self.assertRaises(argparse.ArgumentTypeError):

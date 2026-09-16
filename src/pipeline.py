@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterator
 
+from checkworthy import identify_checkworthiness
 from decompose import decompose_document_into_claims
 from retrieval import create_elasticsearch_client, search_documents
 from verify import verify_claim
@@ -19,6 +20,7 @@ class PipelineConfig:
     es_dump_index: str = "llm-jp-corpus-v3"
     num_evidences: int = 1
     decomposition_prompt: str | None = None
+    checkworthiness_prompt: str | None = None
     verification_prompt: str | None = None
 
     def __post_init__(self) -> None:
@@ -49,7 +51,7 @@ def get_search_client(host: str):
 
 
 def run_factcheck(document: str, context: str | None, config: PipelineConfig) -> Iterator[PipelineEvent]:
-    """Decompose text, retrieve evidence, and verify each claim–evidence pair.
+    """Decompose text, select check-worthy claims, retrieve evidence, and verify pairs.
 
     Yield before slow operations so callers can show the current activity.
     An empty retrieval is reported separately from a model's pair verdict.
@@ -72,17 +74,30 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
         yield PipelineEvent("complete", "No claims found.", claims=[])
         return
 
-    yield PipelineEvent(
-        "preparation",
-        "Preparing retrieval. The first run may require a tokenizer download…",
-        total_claims=total,
-    )
-    tokenizer = get_tokenizer(config.tokenizer_name)
-    yield PipelineEvent("preparation", "Connecting to the evidence database…", total_claims=total)
-    es = get_search_client(config.es_host)
+    yield PipelineEvent("checkworthiness", "Identifying check-worthy claims…", total_claims=total)
+    labels = identify_checkworthiness(claims, model=config.engine, prompt_path=config.checkworthiness_prompt)
+    yield PipelineEvent("checkworthiness", f"Check-worthy claims: {sum(labels)} / {total}.", total_claims=total)
+    if any(labels):
+        yield PipelineEvent(
+            "preparation",
+            "Preparing retrieval. The first run may require a tokenizer download…",
+            total_claims=total,
+        )
+        tokenizer = get_tokenizer(config.tokenizer_name)
+        yield PipelineEvent("preparation", "Connecting to the evidence database…", total_claims=total)
+        es = get_search_client(config.es_host)
 
-    for index, claim in enumerate(claims, 1):
+    for index, (claim, is_checkworthy) in enumerate(zip(claims, labels, strict=True), 1):
         prefix = f"Claim {index} / {total}"
+        if not is_checkworthy:
+            yield PipelineEvent(
+                "claim_complete",
+                f"{prefix}: not check-worthy; retrieval and verification skipped.",
+                index,
+                total,
+                result={"claim": claim, "is_checkworthy": False, "evidences": [], "no_evidence": False},
+            )
+            continue
         yield PipelineEvent("retrieval", f"{prefix}: searching for evidence…", index, total)
         claim_token_ids = tokenizer.encode(claim, add_special_tokens=False)
         hits = search_documents(
@@ -119,7 +134,7 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
                 prompt_path=config.verification_prompt,
             )
 
-        result = {"claim": claim, "evidences": evidences, "no_evidence": not evidences}
+        result = {"claim": claim, "is_checkworthy": True, "evidences": evidences, "no_evidence": not evidences}
         yield PipelineEvent(
             "claim_complete",
             f"{prefix}: verification complete." if evidences else f"{prefix}: no evidence found.",

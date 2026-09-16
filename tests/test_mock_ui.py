@@ -43,6 +43,8 @@ class MockModeUITest(unittest.TestCase):
             "clients.get_client",
             "chat.get_client",
             "decompose.get_client",
+            "checkworthy.get_client",
+            "pipeline.identify_checkworthiness",
             "verify.get_client",
             "pipeline.get_tokenizer",
             "pipeline.get_search_client",
@@ -88,18 +90,23 @@ class MockModeUITest(unittest.TestCase):
     def assert_synthetic_results(self, run):
         self.assertIs(run["mock"], True)
         self.assertEqual(run["state"], "complete")
-        self.assertEqual(len(run["claims"]), 5)
-        self.assertEqual(len(run["results"]), 5)
+        self.assertEqual(len(run["claims"]), 6)
+        self.assertEqual(len(run["results"]), 6)
+        self.assertEqual(sum(result["is_checkworthy"] for result in run["results"]), 5)
         labels = set()
         for result in run["results"]:
             self.assertIs(result["mock"], True)
             self.assertFalse(result["no_evidence"])
+            if not result["is_checkworthy"]:
+                self.assertEqual(result["evidences"], [])
+                continue
             self.assertEqual(len(result["evidences"]), 1)
             for evidence in result["evidences"]:
                 self.assertEqual(evidence["dataset"], "Mock evidence")
                 self.assertNotIn("meta", evidence)
                 labels.add(evidence["verification"]["label"])
         self.assertEqual(labels, LABELS)
+        self.assertTrue(any("Not check-worthy" in caption.value for caption in self.app.caption))
 
     def test_initial_mock_page_explains_synthetic_mode_without_credentials(self):
         self.assertTrue(any(info.value == MOCK_NOTICE for info in self.app.info))

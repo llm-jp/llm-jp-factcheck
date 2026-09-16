@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
+import checkworthy
 import decompose
 import verify
 
@@ -124,9 +125,76 @@ class LLMTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     verify.verify_claim("Claim", "Evidence", "deployment")
 
-    def test_malformed_tool_responses_fail_clearly_for_both_operations(self):
+    def test_checkworthiness_returns_ordered_labels_using_factchecker(self):
+        mocked, getter = self.mock_client(checkworthy, response("setCheckworthyLabels", {"labels": [False, True]}))
+        claims = ["This film is wonderful.", "The museum opened in 2012."]
+        self.assertEqual(checkworthy.identify_checkworthiness(claims, "deployment"), [False, True])
+        getter.assert_called_once_with("factchecker")
+        kwargs = mocked.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "deployment")
+        self.assertIn("- This film is wonderful.\n- The museum opened in 2012.", kwargs["messages"][1]["content"])
+        self.assertEqual(kwargs["tool_choice"]["function"]["name"], "setCheckworthyLabels")
+        self.assertEqual(
+            kwargs["tools"][0]["function"]["parameters"]["properties"]["labels"]["items"], {"type": "boolean"}
+        )
+
+    def test_empty_or_invalid_checkworthiness_inputs_make_no_api_call(self):
+        _, getter = self.mock_client(checkworthy, None)
+        self.assertEqual(checkworthy.identify_checkworthiness([], "deployment"), [])
+        for claims in [None, "Claim", ("Claim",)]:
+            with self.subTest(claims=claims), self.assertRaises(TypeError):
+                checkworthy.identify_checkworthiness(claims, "deployment")
+        for claims in [[None], [1], [" "], ["Claim", ""]]:
+            with self.subTest(claims=claims), self.assertRaises(ValueError):
+                checkworthy.identify_checkworthiness(claims, "deployment")
+        getter.assert_not_called()
+
+    def test_invalid_checkworthiness_labels_are_rejected(self):
+        mocked, _ = self.mock_client(checkworthy, None)
+        for payload in [
+            {},
+            {"labels": True},
+            {"labels": ["true", "false"]},
+            {"labels": [1, 0]},
+            {"labels": [True, None]},
+            {"labels": []},
+            {"labels": [True]},
+            {"labels": [True, False, True]},
+            {"labels": [True, False], "extra": 1},
+        ]:
+            with self.subTest(payload=payload):
+                mocked.chat.completions.create.return_value = response("setCheckworthyLabels", payload)
+                with self.assertRaises(ValueError):
+                    checkworthy.identify_checkworthiness(["Claim A", "Claim B"], "deployment")
+
+    def test_checkworthiness_prompt_can_be_replaced_and_reloads(self):
+        mocked, _ = self.mock_client(checkworthy, response("setCheckworthyLabels", {"labels": [True]}))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "custom.json"
+            for instruction in ["First instructions", "Updated instructions"]:
+                path.write_text(json.dumps({"system": instruction, "user": "Claims: {{claims}}"}), encoding="utf-8")
+                checkworthy.identify_checkworthiness(["Literal {{claims}} text"], "deployment", prompt_path=path)
+                messages = mocked.chat.completions.create.call_args.kwargs["messages"]
+                self.assertEqual(messages[0]["content"], instruction)
+                self.assertEqual(messages[1]["content"], "Claims: - Literal {{claims}} text")
+
+    def test_invalid_checkworthiness_prompt_prevents_client_creation(self):
+        _, getter = self.mock_client(checkworthy, None)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            path.write_text(json.dumps({"system": "Instructions", "user": "{{document}}"}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unknown placeholders"):
+                checkworthy.identify_checkworthiness(["Claim"], "deployment", prompt_path=path)
+        getter.assert_not_called()
+
+    def test_malformed_tool_responses_fail_clearly_for_all_operations(self):
         cases = [
             (decompose, "createClaimList", lambda: decompose.decompose_document_into_claims("Text", "deployment")),
+            (
+                checkworthy,
+                "setCheckworthyLabels",
+                lambda: checkworthy.identify_checkworthiness(["Claim"], "deployment"),
+            ),
             (verify, "setVerificationResult", lambda: verify.verify_claim("Claim", "Evidence", "deployment")),
         ]
         for module, name, invoke in cases:
@@ -173,7 +241,7 @@ class LLMTests(unittest.TestCase):
     def test_importing_backend_does_not_load_azure_or_dotenv(self):
         code = (
             f"import sys; sys.path.insert(0, {str(SRC)!r}); "
-            "import chat, decompose, verify; "
+            "import chat, checkworthy, decompose, verify; "
             "assert 'openai' not in sys.modules; assert 'dotenv' not in sys.modules"
         )
         result = subprocess.run([sys.executable, "-c", code], text=True, capture_output=True)

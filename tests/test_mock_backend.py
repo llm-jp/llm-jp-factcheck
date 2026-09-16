@@ -66,6 +66,10 @@ class MockBackendTests(unittest.TestCase):
     def test_each_claim_has_its_own_coherent_five_label_fixture(self):
         results = self.results(self.response())
         self.assertEqual([result["claim"] for result in results], list(mock_backend.MOCK_CLAIMS))
+        self.assertFalse(results[-1]["is_checkworthy"])
+        self.assertFalse(results[-1]["no_evidence"])
+        self.assertEqual(results[-1]["evidences"], [])
+        results = [result for result in results if result["is_checkworthy"]]
         self.assertEqual([result["evidences"][0]["verification"]["label"] for result in results], list(LABELS))
         for result in results:
             self.assertTrue(result["mock"])
@@ -106,6 +110,9 @@ class MockBackendTests(unittest.TestCase):
         for requested, expected in [(1, 1), (2, 2), (20, 2)]:
             with self.subTest(requested=requested):
                 for result in self.results(document, count=requested):
+                    if not result["is_checkworthy"]:
+                        self.assertEqual(result["evidences"], [])
+                        continue
                     self.assertEqual(len(result["evidences"]), expected)
                     self.assertEqual(len({evidence["passage"] for evidence in result["evidences"]}), expected)
                     self.assertEqual(len({evidence["verification"]["label"] for evidence in result["evidences"]}), 1)
@@ -118,12 +125,27 @@ class MockBackendTests(unittest.TestCase):
         self.sleep.assert_not_called()
         remaining = list(events)
         self.assertEqual(remaining[-1].stage, "complete")
-        self.assertEqual(remaining[-1].current_claim, 5)
-        self.assertEqual(remaining[-1].total_claims, 5)
+        self.assertEqual(remaining[-1].current_claim, 6)
+        self.assertEqual(remaining[-1].total_claims, 6)
+        self.assertIn("checkworthiness", [event.stage for event in remaining])
         self.assertEqual(sum(event.stage == "verification" for event in remaining), 10)
         for index in range(1, 6):
             stages = [event.stage for event in remaining if event.current_claim == index and event.stage != "complete"]
             self.assertEqual(stages, ["retrieval", "verification", "verification", "claim_complete"])
+        self.assertEqual(
+            [event.stage for event in remaining if event.current_claim == 6 and event.stage != "complete"],
+            ["claim_complete"],
+        )
+
+    def test_only_non_checkworthy_sample_skips_retrieval(self):
+        events = list(mock_backend.run_mock_factcheck(mock_backend.MOCK_CLAIMS[-1], None, PipelineConfig()))
+        self.assertEqual(
+            [event.stage for event in events],
+            ["decomposition", "decomposition", "checkworthiness", "claim_complete", "complete"],
+        )
+        result = next(event.result for event in events if event.result is not None)
+        self.assertFalse(result["is_checkworthy"])
+        self.assertEqual(result["evidences"], [])
 
     def test_mutating_results_does_not_modify_other_pairs_or_future_runs(self):
         document = "\n".join(mock_backend.MOCK_CLAIMS)
@@ -139,6 +161,7 @@ class MockBackendTests(unittest.TestCase):
         targets = [
             "clients.get_client",
             "pipeline.decompose_document_into_claims",
+            "pipeline.identify_checkworthiness",
             "pipeline.verify_claim",
             "pipeline.get_tokenizer",
             "pipeline.get_search_client",
@@ -150,7 +173,7 @@ class MockBackendTests(unittest.TestCase):
             mocks.append(patcher.start())
             self.addCleanup(patcher.stop)
         with patch.object(socket, "socket", side_effect=AssertionError("Unexpected network access")):
-            self.assertEqual(len(self.results(self.response(), count=2)), 5)
+            self.assertEqual(len(self.results(self.response(), count=2)), 6)
         for mocked in mocks:
             mocked.assert_not_called()
 

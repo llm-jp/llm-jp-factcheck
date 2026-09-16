@@ -9,9 +9,13 @@ class PipelineTests(unittest.TestCase):
         self.config = PipelineConfig(
             num_evidences=2,
             decomposition_prompt="custom-decomposition.json",
+            checkworthiness_prompt="custom-checkworthiness.json",
             verification_prompt="custom-verification.json",
         )
         self.decompose = self.patch("decompose_document_into_claims", return_value=["クレーム A", "クレーム B"])
+        self.checkworthy = self.patch(
+            "identify_checkworthiness", side_effect=lambda claims, **kwargs: [True] * len(claims)
+        )
         self.tokenizer = Mock()
         self.tokenizer.encode.return_value = [1, 2]
         self.tokenizer.decode.side_effect = lambda ids: "短文" if ids == [1, 2] else "長い根拠の文章"
@@ -80,6 +84,9 @@ class PipelineTests(unittest.TestCase):
         self.decompose.assert_called_once_with(
             "生成文", model=self.config.engine, context="文脈", prompt_path=self.config.decomposition_prompt
         )
+        self.checkworthy.assert_called_once_with(
+            self.decompose.return_value, model=self.config.engine, prompt_path=self.config.checkworthiness_prompt
+        )
         self.assertEqual(events[-1].stage, "complete")
         self.assertEqual(events[-1].current_claim, 2)
 
@@ -89,6 +96,10 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(next(events).stage, "decomposition")
         self.decompose.assert_not_called()
         self.assertIsNotNone(next(events).claims)
+        self.assertEqual(next(events).stage, "checkworthiness")
+        self.checkworthy.assert_not_called()
+        self.assertEqual(next(events).stage, "checkworthiness")
+        self.checkworthy.assert_called_once()
         self.assertEqual(next(events).stage, "preparation")
         self.load_tokenizer.assert_not_called()
         self.assertEqual(next(events).stage, "preparation")
@@ -96,6 +107,49 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(next(events).stage, "retrieval")
         self.search.assert_not_called()
         list(events)
+
+    def test_skips_non_checkworthy_claims_and_preserves_source_order(self):
+        self.decompose.return_value = ["Opinion", "Factual claim", "Question"]
+        self.checkworthy.side_effect = None
+        self.checkworthy.return_value = [False, True, False]
+        self.search.return_value = [self.hit()]
+        events = list(run_factcheck("Response", None, self.config))
+        results = [event.result for event in events if event.result is not None]
+        self.assertEqual([result["claim"] for result in results], self.decompose.return_value)
+        self.assertEqual([result["is_checkworthy"] for result in results], [False, True, False])
+        self.search.assert_called_once()
+        self.tokenizer.encode.assert_called_once_with("Factual claim", add_special_tokens=False)
+        self.verify.assert_called_once_with(
+            "Factual claim", "短文", model=self.config.engine, prompt_path=self.config.verification_prompt
+        )
+        for result in (results[0], results[2]):
+            self.assertEqual(result["evidences"], [])
+            self.assertFalse(result["no_evidence"])
+        self.assertEqual(events[-1].stage, "complete")
+        self.assertEqual(events[-1].current_claim, 3)
+
+    def test_all_non_checkworthy_claims_skip_all_retrieval_setup(self):
+        self.checkworthy.side_effect = lambda claims, **kwargs: [False] * len(claims)
+        events = list(run_factcheck("Response", None, self.config))
+        self.assertEqual(events[-1].stage, "complete")
+        results = [event.result for event in events if event.result is not None]
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(result["is_checkworthy"] is False for result in results))
+        self.assertNotIn("preparation", [event.stage for event in events])
+        self.load_tokenizer.assert_not_called()
+        self.load_es.assert_not_called()
+        self.search.assert_not_called()
+        self.verify.assert_not_called()
+
+    def test_checkworthiness_failure_stops_before_retrieval(self):
+        self.checkworthy.side_effect = ValueError("Invalid check-worthiness labels")
+        events = run_factcheck("Response", None, self.config)
+        with self.assertRaisesRegex(ValueError, "Invalid check-worthiness labels"):
+            list(events)
+        self.load_tokenizer.assert_not_called()
+        self.load_es.assert_not_called()
+        self.search.assert_not_called()
+        self.verify.assert_not_called()
 
     def test_no_evidence_is_explicit_and_does_not_invoke_verifier(self):
         self.search.return_value = []
@@ -147,6 +201,7 @@ class PipelineTests(unittest.TestCase):
         self.decompose.return_value = []
         events = list(run_factcheck("生成文", None, self.config))
         self.assertEqual(events[-1].stage, "complete")
+        self.checkworthy.assert_not_called()
         self.load_tokenizer.assert_not_called()
         self.load_es.assert_not_called()
 
