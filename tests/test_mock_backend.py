@@ -123,7 +123,7 @@ class MockBackendTests(unittest.TestCase):
         self.assertEqual(sum(event.stage == "verification" for event in remaining), 10)
         for index in range(1, 6):
             stages = [event.stage for event in remaining if event.current_claim == index and event.stage != "complete"]
-            self.assertEqual(stages, ["retrieval", "ranking", "verification", "verification", "claim_complete"])
+            self.assertEqual(stages, ["retrieval", "verification", "verification", "claim_complete"])
 
     def test_mutating_results_does_not_modify_other_pairs_or_future_runs(self):
         document = "\n".join(mock_backend.MOCK_CLAIMS)
@@ -142,7 +142,6 @@ class MockBackendTests(unittest.TestCase):
             "pipeline.verify_claim",
             "pipeline.get_tokenizer",
             "pipeline.get_search_client",
-            "pipeline.get_relevance_scorer",
             "pipeline.search_documents",
         ]
         mocks = []

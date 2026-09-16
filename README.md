@@ -59,7 +59,9 @@ Configure retrieval with environment variables or `.env`:
 
 CLI arguments take precedence over environment variables, followed by the defaults above. Existing process environment variables take precedence over `.env`; blank or whitespace-only values use the defaults. Restart Streamlit after changing these settings.
 
-Set `TOKENIZER_NAME` or `--tokenizer_name` to the tokenizer used to build the index. The first fact-check downloads the tokenizer and embedding model from Hugging Face if they are not cached.
+Set `TOKENIZER_NAME` or `--tokenizer_name` to the tokenizer used to build the index. The first fact-check downloads the tokenizer from Hugging Face if it is not cached.
+
+Retrieval follows the `v3.0` branch: encode each claim without special tokens, search the `token_ids` field with a match query, and request up to `--num_evidences` hits. Each hit is decoded into a complete evidence passage in Elasticsearch result order, with its source and training step preserved. Passages are not split or reranked locally. Empty passages are skipped.
 
 ## Run
 
@@ -92,7 +94,7 @@ uv run --locked streamlit run src/serve.py -- \
 
 ## Mock mode
 
-After `uv sync --locked`, try the interface without API credentials, Elasticsearch, or model downloads:
+After `uv sync --locked`, try the interface without API credentials, Elasticsearch, or tokenizer downloads:
 
 ```bash
 uv run --locked streamlit run src/serve.py -- --mock
@@ -100,7 +102,7 @@ uv run --locked streamlit run src/serve.py -- --mock
 
 `--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all five verdict labels, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
 
-Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and eight seconds per fact-check with the default evidence count, excluding UI overhead. Adjust the delay constants in `src/mock_backend.py` to change these timings.
+Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and six seconds per fact-check with the default evidence count, excluding UI overhead. Adjust the delay constants in `src/mock_backend.py` to change these timings.
 
 Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings, except `--num_evidences`, which selects up to two available synthetic evidence passages per claim. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
 
@@ -112,7 +114,7 @@ Results remain associated with their response as the conversation continues. Cla
 
 The first fact-check starts immediately. Checking the same response again shows an inline confirmation: **Run again** replaces its existing results, while **Cancel** keeps them. The progress indicator disappears when the run ends. Expand **Evidence passage** to read a passage and **Source details** to see its source name and training step.
 
-For each extracted claim, the app retrieves and ranks evidence passages, then verifies each claim–evidence pair independently. Every extracted claim is processed. When retrieval returns no evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call. API and retrieval failures are reported as errors rather than verdicts.
+For each extracted claim, the app retrieves evidence passages in Elasticsearch result order, then verifies each claim–evidence pair independently. Every extracted claim is processed. When retrieval returns no usable evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call. API and retrieval failures are reported as errors rather than verdicts.
 
 ## Replace prompts
 
@@ -186,6 +188,6 @@ uv lock --check
 
 To enable the Git hooks, run `uv run --locked pre-commit install`. The hooks use the project's locked Ruff version and check that `uv.lock` is up to date.
 
-Tests mock LLM calls, retrieval, and model loading. SDK requests also run against a mock HTTP transport to check independent endpoint routing, authentication, and Azure API versions for all provider combinations. Tests cover multi-turn chat, response-specific verification and result persistence, decomposition context, conversation reset, prompt replacement, output validation, pair-level verdicts, progress, and error handling. They do not send live API requests. Accuracy evaluation requires the actual models and indexes.
+Tests mock LLM calls, retrieval, and tokenizer loading. SDK requests also run against a mock HTTP transport to check independent endpoint routing, authentication, and Azure API versions for all provider combinations. Tests cover multi-turn chat, response-specific verification and result persistence, decomposition context, conversation reset, prompt replacement, output validation, pair-level verdicts, progress, and error handling. They do not send live API requests. Accuracy evaluation requires the actual models and indexes.
 
 Manage dependencies with `uv add`, `uv add --dev`, and `uv remove`. Commit changes to both `pyproject.toml` and `uv.lock` together.

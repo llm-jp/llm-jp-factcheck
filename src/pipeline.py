@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import Iterator
 
 from decompose import decompose_document_into_claims
-from retrieval import chunk_document, create_elasticsearch_client, create_relevance_scorer, search_documents
+from retrieval import create_elasticsearch_client, search_documents
 from verify import verify_claim
 
 
@@ -18,7 +18,6 @@ class PipelineConfig:
     es_host: str = "http://localhost:9200"
     es_dump_index: str = "llm-jp-corpus-v3"
     num_evidences: int = 1
-    embedding: str = "intfloat/multilingual-e5-base"
     decomposition_prompt: str | None = None
     verification_prompt: str | None = None
 
@@ -49,11 +48,6 @@ def get_search_client(host: str):
     return create_elasticsearch_client(host)
 
 
-@lru_cache(maxsize=4)
-def get_relevance_scorer(name: str):
-    return create_relevance_scorer(name)
-
-
 def run_factcheck(document: str, context: str | None, config: PipelineConfig) -> Iterator[PipelineEvent]:
     """Decompose text, retrieve evidence, and verify each claim–evidence pair.
 
@@ -80,7 +74,7 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
 
     yield PipelineEvent(
         "preparation",
-        "Preparing retrieval. The first run may require a model download…",
+        "Preparing retrieval. The first run may require a tokenizer download…",
         total_claims=total,
     )
     tokenizer = get_tokenizer(config.tokenizer_name)
@@ -95,29 +89,21 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
             es,
             config.es_dump_index,
             body={"query": {"match": {"token_ids": " ".join(map(str, claim_token_ids))}}},
-            size=3,
+            size=config.num_evidences,
             max_concurrent_shard_requests=64,
         )
-        candidates = []
-        if hits:
-            yield PipelineEvent(
-                "ranking", f"{prefix}: preparing the ranking model and comparing passages…", index, total
-            )
-            scorer = get_relevance_scorer(config.embedding)
-            for hit in hits:
-                source = hit["_source"]
-                source_text = tokenizer.decode(list(map(int, source["token_ids"].split()))).strip()
-                for passage in chunk_document(source_text):
-                    if passage.strip():
-                        candidates.append(
-                            {
-                                "passage": passage,
-                                "dataset": source.get("dataset_name", ""),
-                                "training_step": source.get("iteration"),
-                                "score": scorer(claim, passage),
-                            }
-                        )
-        evidences = sorted(candidates, key=lambda item: item["score"], reverse=True)[: config.num_evidences]
+        evidences = []
+        for hit in hits:
+            source = hit["_source"]
+            passage = tokenizer.decode(list(map(int, source["token_ids"].split()))).strip()
+            if passage:
+                evidences.append(
+                    {
+                        "passage": passage,
+                        "dataset": source.get("dataset_name", ""),
+                        "training_step": source.get("iteration"),
+                    }
+                )
 
         for evidence_index, evidence in enumerate(evidences, 1):
             yield PipelineEvent(

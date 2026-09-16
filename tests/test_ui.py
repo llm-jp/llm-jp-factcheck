@@ -50,7 +50,6 @@ def claim_result(claim="Tokyo is Japan's capital.", labels=None):
                 "passage": f"Evidence {i}: <script>unsafe</script>",
                 "dataset": "test dataset",
                 "training_step": 123,
-                "score": 0.85,
                 "verification": {"label": label, "rationale": f"Reason {i}"},
             }
             for i, label in enumerate(labels or ["Supported"], 1)
@@ -64,7 +63,6 @@ def completed_events(result):
             event("decomposition", claims=[result["claim"]], total_claims=1),
             event("preparation", total_claims=1),
             event("retrieval", current_claim=1, total_claims=1),
-            event("ranking", current_claim=1, total_claims=1),
             event("verification", current_claim=1, total_claims=1),
             event("claim_complete", current_claim=1, total_claims=1, result=result),
             event("complete", current_claim=1, total_claims=1),
@@ -382,7 +380,6 @@ class ChatUITest(unittest.TestCase):
         self.assertNotIn("Relevance score", visible)
         evidence = run["results"][0]["evidences"][0]
         self.assertEqual(evidence["training_step"], 123)
-        self.assertEqual(evidence["score"], 0.85)
         self.assertNotIn("meta", evidence)
         passages = [expander for expander in self.app.expander if expander.label == "Evidence passage"]
         self.assertEqual(len(passages), 5)

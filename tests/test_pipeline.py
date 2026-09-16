@@ -14,12 +14,10 @@ class PipelineTests(unittest.TestCase):
         self.decompose = self.patch("decompose_document_into_claims", return_value=["クレーム A", "クレーム B"])
         self.tokenizer = Mock()
         self.tokenizer.encode.return_value = [1, 2]
-        self.tokenizer.decode.return_value = "根拠テキスト"
+        self.tokenizer.decode.side_effect = lambda ids: "短文" if ids == [1, 2] else "長い根拠の文章"
         self.load_tokenizer = self.patch("get_tokenizer", return_value=self.tokenizer)
         self.load_es = self.patch("get_search_client")
-        self.load_scorer = self.patch("get_relevance_scorer", return_value=lambda claim, passage: len(passage))
         self.search = self.patch("search_documents")
-        self.chunk = self.patch("chunk_document", return_value=["短文", "長い根拠の文章"])
         self.verify = self.patch("verify_claim", side_effect=self.verdict)
 
     def patch(self, name, **kwargs):
@@ -32,11 +30,11 @@ class PipelineTests(unittest.TestCase):
         return {"label": "Supported" if evidence == "短文" else "Refuted", "rationale": f"{claim} / {evidence}"}
 
     @staticmethod
-    def hit():
-        return {"_source": {"token_ids": "1 2", "dataset_name": "test-corpus", "iteration": 10}}
+    def hit(token_ids="1 2", dataset="test-corpus", training_step=10):
+        return {"_source": {"token_ids": token_ids, "dataset_name": dataset, "iteration": training_step}}
 
     def test_verifies_every_pair_separately_and_preserves_evidence_association(self):
-        self.search.side_effect = [[self.hit()], [self.hit()]]
+        self.search.return_value = [self.hit(training_step=0), self.hit("3 4", "second-corpus", 20)]
         events = list(run_factcheck("生成文", "文脈", self.config))
         results = [event.result for event in events if event.stage == "claim_complete"]
         self.assertEqual(len(results), 2)
@@ -45,20 +43,40 @@ class PipelineTests(unittest.TestCase):
             [
                 call(claim, evidence, model=self.config.engine, prompt_path=self.config.verification_prompt)
                 for claim in ["クレーム A", "クレーム B"]
-                for evidence in ["長い根拠の文章", "短文"]
+                for evidence in ["短文", "長い根拠の文章"]
             ]
         )
-        self.assertEqual(results[0]["evidences"][0]["verification"]["label"], "Refuted")
-        self.assertEqual(results[0]["evidences"][1]["verification"]["label"], "Supported")
+        self.assertEqual(results[0]["evidences"][0]["verification"]["label"], "Supported")
+        self.assertEqual(results[0]["evidences"][1]["verification"]["label"], "Refuted")
         self.assertEqual(self.search.call_count, 2)
         for search_call in self.search.call_args_list:
-            self.assertEqual(search_call.args[1], self.config.es_dump_index)
+            self.assertEqual(search_call.args, (self.load_es.return_value, self.config.es_dump_index))
+            self.assertEqual(
+                search_call.kwargs,
+                {
+                    "body": {"query": {"match": {"token_ids": "1 2"}}},
+                    "size": 2,
+                    "max_concurrent_shard_requests": 64,
+                },
+            )
         for result in results:
+            self.assertEqual(
+                [
+                    (evidence["passage"], evidence["dataset"], evidence["training_step"])
+                    for evidence in result["evidences"]
+                ],
+                [("短文", "test-corpus", 0), ("長い根拠の文章", "second-corpus", 20)],
+            )
             for evidence in result["evidences"]:
-                self.assertEqual(evidence["dataset"], "test-corpus")
-                self.assertEqual(evidence["training_step"], 10)
                 self.assertNotIn("meta", evidence)
+                self.assertNotIn("score", evidence)
         self.assertNotIn("metadata", [event.stage for event in events])
+        self.assertNotIn("ranking", [event.stage for event in events])
+        self.assertEqual(
+            self.tokenizer.encode.call_args_list,
+            [call(claim, add_special_tokens=False) for claim in ["クレーム A", "クレーム B"]],
+        )
+        self.assertEqual(self.tokenizer.decode.call_args_list, [call([1, 2]), call([3, 4])] * 2)
         self.decompose.assert_called_once_with(
             "生成文", model=self.config.engine, context="文脈", prompt_path=self.config.decomposition_prompt
         )
@@ -86,7 +104,41 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertTrue(all(result["no_evidence"] and not result["evidences"] for result in results))
         self.verify.assert_not_called()
-        self.load_scorer.assert_not_called()
+
+    def test_requested_evidence_count_controls_search_size(self):
+        self.decompose.return_value = ["Claim"]
+        for count in [1, 5]:
+            with self.subTest(count=count):
+                self.search.return_value = [self.hit(str(index)) for index in range(count)]
+                self.verify.reset_mock()
+                events = list(run_factcheck("Response", None, PipelineConfig(num_evidences=count)))
+                results = [event.result for event in events if event.result is not None]
+                self.assertEqual(self.search.call_args.kwargs["size"], count)
+                self.assertEqual(len(results[0]["evidences"]), count)
+                self.assertEqual(self.verify.call_count, count)
+
+    def test_long_hit_is_verified_as_one_complete_passage(self):
+        self.decompose.return_value = ["Claim"]
+        passage = "Complete evidence passage. " * 100
+        self.tokenizer.decode.side_effect = None
+        self.tokenizer.decode.return_value = f"  {passage}\n"
+        self.search.return_value = [self.hit()]
+        events = list(run_factcheck("Response", None, self.config))
+        result = next(event.result for event in events if event.result is not None)
+        self.assertEqual(len(result["evidences"]), 1)
+        self.assertEqual(result["evidences"][0]["passage"], passage.strip())
+        self.verify.assert_called_once_with(
+            "Claim", passage.strip(), model=self.config.engine, prompt_path=self.config.verification_prompt
+        )
+
+    def test_empty_decoded_hits_skip_verification(self):
+        self.search.return_value = [self.hit(token_ids="")]
+        self.tokenizer.decode.side_effect = None
+        self.tokenizer.decode.return_value = " \n "
+        events = list(run_factcheck("Response", None, self.config))
+        results = [event.result for event in events if event.result is not None]
+        self.assertTrue(all(result["no_evidence"] and not result["evidences"] for result in results))
+        self.verify.assert_not_called()
 
     def test_empty_document_or_no_claims_skips_retrieval(self):
         events = list(run_factcheck(" \n", None, self.config))

@@ -3,15 +3,12 @@ name = "llm-jp-factcheck"
 version = "0.1.0"
 description = "A research demo for claim-level fact-checking of LLM conversations."
 readme = "README.md"
-# Preserve the Python versions supported by the existing PyTorch release.
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "elasticsearch==8.13.0",
-    "langchain-text-splitters==0.0.1",
     "openai==1.25.0",
     "python-dotenv==1.0.1",
     "streamlit==1.33.0",
-    "torch==2.3.0",
     "transformers==4.40.1",
 ]
 

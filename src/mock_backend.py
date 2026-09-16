@@ -119,12 +119,8 @@ def run_mock_factcheck(document: str, context: str | None, config: PipelineConfi
     sleep(PREPARATION_DELAY)
     for index, fixture in enumerate(fixtures, 1):
         prefix = f"Sample claim {index} / {total}"
-        for stage, activity in (
-            ("retrieval", "selecting mock evidence"),
-            ("ranking", "ordering sample passages"),
-        ):
-            yield PipelineEvent(stage, f"{prefix}: {activity}…", index, total)
-            sleep(RETRIEVAL_STAGE_DELAY)
+        yield PipelineEvent("retrieval", f"{prefix}: selecting mock evidence…", index, total)
+        sleep(RETRIEVAL_STAGE_DELAY)
         evidences = []
         passages = fixture.passages[: config.num_evidences]
         for evidence_index, passage in enumerate(passages, 1):

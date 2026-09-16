@@ -75,13 +75,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Search index (overrides ES_DUMP_INDEX; default: llm-jp-corpus-v3).",
     )
     parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=1)
-    parser.add_argument("--embedding", default="intfloat/multilingual-e5-base")
     parser.add_argument("--decomposition-prompt", "--decomposition_prompt", default=None)
     parser.add_argument("--verification-prompt", "--verification_prompt", default=None)
     parser.add_argument(
         "--mock",
         action="store_true",
-        help="Use synthetic chat and fact-check results without API calls, Elasticsearch, or model downloads.",
+        help="Use synthetic chat and fact-check results without API calls, Elasticsearch, or tokenizer downloads.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
     args = parser.parse_args(argv)
@@ -183,7 +182,7 @@ def _progress(event) -> float:
     if event.stage == "preparation":
         return 0.12
     if event.total_claims:
-        fractions = {"retrieval": 0.08, "ranking": 0.25, "verification": 0.72, "claim_complete": 1.0}
+        fractions = {"retrieval": 0.08, "verification": 0.72, "claim_complete": 1.0}
         completed = max(event.current_claim - 1, 0) + fractions.get(event.stage, 0)
         return min(0.98, 0.15 + 0.83 * completed / event.total_claims)
     return 0.15
@@ -217,7 +216,7 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
         message.caption(
             "Simulating decomposition, evidence retrieval, and verification with synthetic data."
             if args.mock
-            else "Decomposition → evidence retrieval → verification. Initial model loading may take some time."
+            else "Decomposition → evidence retrieval → verification. Initial tokenizer loading may take some time."
         )
         try:
             config = PipelineConfig(
@@ -226,7 +225,6 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
                 es_host=args.es_host,
                 es_dump_index=args.es_dump_index,
                 num_evidences=args.num_evidences,
-                embedding=args.embedding,
                 decomposition_prompt=args.decomposition_prompt,
                 verification_prompt=args.verification_prompt,
             )
