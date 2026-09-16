@@ -122,7 +122,6 @@ def run_mock_factcheck(document: str, context: str | None, config: PipelineConfi
         for stage, activity in (
             ("retrieval", "selecting mock evidence"),
             ("ranking", "ordering sample passages"),
-            ("metadata", "loading sample source details"),
         ):
             yield PipelineEvent(stage, f"{prefix}: {activity}…", index, total)
             sleep(RETRIEVAL_STAGE_DELAY)
@@ -140,7 +139,6 @@ def run_mock_factcheck(document: str, context: str | None, config: PipelineConfi
                 {
                     "passage": passage,
                     "dataset": "Mock evidence",
-                    "meta": {"mock": True, "source": "Fictional Northstar Museum records", "variant": evidence_index},
                     "verification": {"label": fixture.label, "rationale": fixture.rationale},
                 }
             )

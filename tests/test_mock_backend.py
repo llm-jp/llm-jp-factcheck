@@ -73,8 +73,7 @@ class MockBackendTests(unittest.TestCase):
             self.assertEqual(len(result["evidences"]), 1)
             evidence = result["evidences"][0]
             self.assertEqual(evidence["dataset"], "Mock evidence")
-            self.assertTrue(evidence["meta"]["mock"])
-            self.assertNotIn("url", evidence["meta"])
+            self.assertNotIn("meta", evidence)
             self.assertTrue(evidence["passage"].startswith("Fictional"))
             self.assertTrue(evidence["verification"]["rationale"])
         self.assertIn("2012", results[0]["evidences"][0]["passage"])
@@ -124,16 +123,13 @@ class MockBackendTests(unittest.TestCase):
         self.assertEqual(sum(event.stage == "verification" for event in remaining), 10)
         for index in range(1, 6):
             stages = [event.stage for event in remaining if event.current_claim == index and event.stage != "complete"]
-            self.assertEqual(
-                stages, ["retrieval", "ranking", "metadata", "verification", "verification", "claim_complete"]
-            )
+            self.assertEqual(stages, ["retrieval", "ranking", "verification", "verification", "claim_complete"])
 
     def test_mutating_results_does_not_modify_other_pairs_or_future_runs(self):
         document = "\n".join(mock_backend.MOCK_CLAIMS)
         results = self.results(document, count=2)
         original = deepcopy(results)
         results[0]["claim"] = "Changed"
-        results[0]["evidences"][0]["meta"]["mock"] = False
         results[0]["evidences"][0]["verification"]["label"] = "Changed"
         self.assertEqual(results[0]["evidences"][1], original[0]["evidences"][1])
         self.assertEqual(results[1:], original[1:])

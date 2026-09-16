@@ -36,8 +36,7 @@ class PipelineTests(unittest.TestCase):
         return {"_source": {"token_ids": "1 2", "dataset_name": "test-corpus", "iteration": 10}}
 
     def test_verifies_every_pair_separately_and_preserves_evidence_association(self):
-        meta = {"_source": {"meta": '{"url": "https://example.org/source"}'}}
-        self.search.side_effect = [[self.hit()], [meta], [], [self.hit()], [], []]
+        self.search.side_effect = [[self.hit()], [self.hit()]]
         events = list(run_factcheck("生成文", "文脈", self.config))
         results = [event.result for event in events if event.stage == "claim_complete"]
         self.assertEqual(len(results), 2)
@@ -51,8 +50,15 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertEqual(results[0]["evidences"][0]["verification"]["label"], "Refuted")
         self.assertEqual(results[0]["evidences"][1]["verification"]["label"], "Supported")
-        self.assertEqual(results[0]["evidences"][0]["meta"]["url"], "https://example.org/source")
-        self.assertEqual(results[0]["evidences"][1]["meta"], {})
+        self.assertEqual(self.search.call_count, 2)
+        for search_call in self.search.call_args_list:
+            self.assertEqual(search_call.args[1], self.config.es_dump_index)
+        for result in results:
+            for evidence in result["evidences"]:
+                self.assertEqual(evidence["dataset"], "test-corpus")
+                self.assertEqual(evidence["training_step"], 10)
+                self.assertNotIn("meta", evidence)
+        self.assertNotIn("metadata", [event.stage for event in events])
         self.decompose.assert_called_once_with(
             "生成文", model=self.config.engine, context="文脈", prompt_path=self.config.decomposition_prompt
         )
@@ -93,7 +99,7 @@ class PipelineTests(unittest.TestCase):
         self.load_es.assert_not_called()
 
     def test_verification_failure_is_not_an_insufficient_evidence_verdict(self):
-        self.search.side_effect = [[self.hit()], [], []]
+        self.search.return_value = [self.hit()]
         self.verify.side_effect = RuntimeError("API unavailable")
         events = run_factcheck("生成文", None, self.config)
         completed = []

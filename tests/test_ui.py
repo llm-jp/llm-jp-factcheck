@@ -2,20 +2,30 @@
 
 import argparse
 import importlib.util
+import os
 import re
 import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
+from dotenv import load_dotenv
 from streamlit.runtime.scriptrunner import StopException
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "serve.py"
 LABELS = ["Supported", "Partially supported", "Partially refuted", "Refuted", "Not enough information"]
+
+
+def load_ui_module():
+    spec = importlib.util.spec_from_file_location("factcheck_ui_for_test", APP)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def event(stage, **kwargs):
@@ -41,7 +51,6 @@ def claim_result(claim="Tokyo is Japan's capital.", labels=None):
                 "dataset": "test dataset",
                 "training_step": 123,
                 "score": 0.85,
-                "meta": {"url": "https://example.com/evidence"},
                 "verification": {"label": label, "rationale": f"Reason {i}"},
             }
             for i, label in enumerate(labels or ["Supported"], 1)
@@ -56,7 +65,6 @@ def completed_events(result):
             event("preparation", total_claims=1),
             event("retrieval", current_claim=1, total_claims=1),
             event("ranking", current_claim=1, total_claims=1),
-            event("metadata", current_claim=1, total_claims=1),
             event("verification", current_claim=1, total_claims=1),
             event("claim_complete", current_claim=1, total_claims=1, result=result),
             event("complete", current_claim=1, total_claims=1),
@@ -66,6 +74,17 @@ def completed_events(result):
 
 class ChatUITest(unittest.TestCase):
     def setUp(self):
+        configuration_environment = {"CHATBOT_MODEL", "FACTCHECKER_MODEL", "TOKENIZER_NAME", "ES_HOST", "ES_DUMP_INDEX"}
+        self.env_patch = patch.dict(
+            os.environ,
+            {key: value for key, value in os.environ.items() if key not in configuration_environment},
+            clear=True,
+        )
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+        self.dotenv_patch = patch("dotenv.load_dotenv", return_value=False)
+        self.dotenv_patch.start()
+        self.addCleanup(self.dotenv_patch.stop)
         self.pipeline = ModuleType("pipeline")
         self.pipeline.PipelineConfig = Mock(side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
         self.pipeline.run_factcheck = Mock()
@@ -360,12 +379,11 @@ class ChatUITest(unittest.TestCase):
             self.assertEqual([text.value for text in source.text], ["Source: test dataset", "Training step: 123"])
         visible = content + "\n" + "\n".join(text.value for text in self.app.text)
         visible += "\n" + "\n".join(caption.value for caption in self.app.caption)
-        for hidden_detail in ["Relevance score", "https://example.com/evidence"]:
-            self.assertNotIn(hidden_detail, visible)
+        self.assertNotIn("Relevance score", visible)
         evidence = run["results"][0]["evidences"][0]
         self.assertEqual(evidence["training_step"], 123)
         self.assertEqual(evidence["score"], 0.85)
-        self.assertEqual(evidence["meta"], {"url": "https://example.com/evidence"})
+        self.assertNotIn("meta", evidence)
         passages = [expander for expander in self.app.expander if expander.label == "Evidence passage"]
         self.assertEqual(len(passages), 5)
         self.assertTrue(all(not passage.proto.expanded for passage in passages))
@@ -572,9 +590,7 @@ class ChatUITest(unittest.TestCase):
         self.pipeline.run_factcheck.assert_called_once()
 
     def test_cli_prompt_paths_chat_engine_and_evidence_validation(self):
-        spec = importlib.util.spec_from_file_location("factcheck_ui_for_test", APP)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_ui_module()
         args = module.parse_args(
             [
                 "--decomposition-prompt",
@@ -594,22 +610,162 @@ class ChatUITest(unittest.TestCase):
             module.positive_integer("-2")
         self.assertEqual(module.positive_integer("3"), 3)
 
+    def test_model_defaults_from_dotenv_respect_process_environment(self):
+        module = load_ui_module()
+        self.assertEqual(module.DOTENV_PATH, ROOT / ".env")
+        cases = [
+            ({}, "file-factchecker", "file-chatbot"),
+            ({"FACTCHECKER_MODEL": " process-factchecker "}, "process-factchecker", "file-chatbot"),
+            (
+                {"FACTCHECKER_MODEL": "process-factchecker", "CHATBOT_MODEL": " process-chatbot "},
+                "process-factchecker",
+                "process-chatbot",
+            ),
+            ({"FACTCHECKER_MODEL": " \t ", "CHATBOT_MODEL": ""}, "gpt-4-0613", None),
+        ]
+        with TemporaryDirectory() as directory:
+            dotenv_path = Path(directory) / ".env"
+            dotenv_path.write_text(
+                'FACTCHECKER_MODEL=" file-factchecker "\nCHATBOT_MODEL=" file-chatbot "\n', encoding="utf-8"
+            )
+            for environment, expected_engine, expected_chat_engine in cases:
+                with (
+                    self.subTest(environment=environment),
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(module, "DOTENV_PATH", dotenv_path),
+                    patch("dotenv.load_dotenv", wraps=load_dotenv) as loader,
+                ):
+                    args = module.parse_args([])
+                    loader.assert_called_once_with(dotenv_path, override=False)
+                    self.assertEqual(args.engine, expected_engine)
+                    self.assertEqual(args.chat_engine, expected_chat_engine)
+
+    def test_mock_mode_ignores_environment_and_skips_dotenv(self):
+        module = load_ui_module()
+        environment = {
+            "FACTCHECKER_MODEL": "environment-factchecker",
+            "CHATBOT_MODEL": "environment-chatbot",
+            "TOKENIZER_NAME": "unused-tokenizer",
+            "ES_HOST": "http://unused:9200",
+            "ES_DUMP_INDEX": "unused-index",
+        }
+        cases = [
+            (["--mock"], "gpt-4-0613", None),
+            (["--mock", "--engine", "cli-factchecker"], "cli-factchecker", None),
+            (
+                ["--mock", "--engine", "cli-factchecker", "--chat-engine", "cli-chatbot"],
+                "cli-factchecker",
+                "cli-chatbot",
+            ),
+        ]
+        for argv, expected_engine, expected_chat_engine in cases:
+            with (
+                self.subTest(argv=argv),
+                patch.dict(os.environ, environment),
+                patch("dotenv.load_dotenv", side_effect=AssertionError("Mock mode must not read .env")) as loader,
+            ):
+                args = module.parse_args(argv)
+                loader.assert_not_called()
+                self.assertEqual(args.engine, expected_engine)
+                self.assertEqual(args.chat_engine, expected_chat_engine)
+                self.assertEqual(args.tokenizer_name, "llm-jp/llm-jp-3-13b")
+                self.assertEqual(args.es_host, "http://10.2.73.12:9200")
+                self.assertEqual(args.es_dump_index, "llm-jp-corpus-v3")
+
+    def test_retrieval_configuration_precedence(self):
+        module = load_ui_module()
+        names = ("tokenizer_name", "es_host", "es_dump_index")
+        defaults = ("llm-jp/llm-jp-3-13b", "http://10.2.73.12:9200", "llm-jp-corpus-v3")
+        file_values = ("file-tokenizer", "http://file:9200", "file-index")
+        process_values = ("process-tokenizer", "http://process:9200", "process-index")
+        cli_values = ("cli-tokenizer", "http://cli:9200", "cli-index")
+        environment = {name.upper(): f" {value} " for name, value in zip(names, process_values)}
+        cases = [
+            ([], {}, "", defaults),
+            ([], {}, "dotenv", file_values),
+            ([], environment, "dotenv", process_values),
+            ([], {name.upper(): " \t " for name in names}, "dotenv", defaults),
+            (
+                [item for name, value in zip(names, cli_values) for item in (f"--{name}", value)],
+                environment,
+                "dotenv",
+                cli_values,
+            ),
+            (
+                ["--es-host", "http://override:9200"],
+                environment,
+                "dotenv",
+                (process_values[0], "http://override:9200", process_values[2]),
+            ),
+        ]
+        with TemporaryDirectory() as directory:
+            dotenv_path = Path(directory) / ".env"
+            for argv, values, file_content, expected in cases:
+                with (
+                    self.subTest(argv=argv, environment=values, file_content=file_content),
+                    patch.dict(os.environ, values, clear=True),
+                    patch.object(module, "DOTENV_PATH", dotenv_path),
+                    patch("dotenv.load_dotenv", wraps=load_dotenv),
+                ):
+                    dotenv_path.write_text(
+                        "\n".join(f'{name.upper()}=" {value} "' for name, value in zip(names, file_values))
+                        if file_content
+                        else "",
+                        encoding="utf-8",
+                    )
+                    args = module.parse_args(argv)
+                    self.assertEqual(tuple(getattr(args, name) for name in names), expected)
+                    self.assertFalse(hasattr(args, "es_meta_index"))
+
+    def test_retrieval_environment_is_passed_to_factchecker(self):
+        environment = {
+            "TOKENIZER_NAME": "custom-tokenizer",
+            "ES_HOST": "http://custom:9200",
+            "ES_DUMP_INDEX": "custom-index",
+        }
+        with patch.dict(os.environ, environment):
+            self.app = AppTest.from_file(str(APP), default_timeout=10).run()
+            self.assert_app_ok()
+            self.send("Tell me about Japan.")
+            self.check(self.assistants()[0]["id"], claim_result())
+            config = self.pipeline.run_factcheck.call_args.args[2]
+            self.assertEqual(config.tokenizer_name, environment["TOKENIZER_NAME"])
+            self.assertEqual(config.es_host, environment["ES_HOST"])
+            self.assertEqual(config.es_dump_index, environment["ES_DUMP_INDEX"])
+            self.assertFalse(hasattr(config, "es_meta_index"))
+
     def test_chat_model_selection_does_not_change_factchecker_model(self):
-        for chat_engine in [None, "chat-model"]:
-            with self.subTest(chat_engine=chat_engine):
-                argv = [str(APP), "--engine", "verification-model"]
-                if chat_engine:
-                    argv.extend(["--chat-engine", chat_engine])
-                with patch.object(sys, "argv", argv):
-                    self.app = AppTest.from_file(str(APP), default_timeout=10).run()
-                    self.assert_app_ok()
-                    self.send("Tell me about Japan.")
-                    chat_call = self.chat.stream_chat_response.call_args
-                    model = chat_call.kwargs.get("model") or chat_call.args[1]
-                    self.assertEqual(model, chat_engine or "verification-model")
-                    self.check(self.assistants()[0]["id"], claim_result())
-                    config = self.pipeline.run_factcheck.call_args.args[2]
-                    self.assertEqual(config.engine, "verification-model")
+        environment = {"FACTCHECKER_MODEL": " env-factchecker ", "CHATBOT_MODEL": " env-chatbot "}
+        cases = [
+            ([], {}, "gpt-4-0613", "gpt-4-0613"),
+            (["--engine", "cli-factchecker"], {}, "cli-factchecker", "cli-factchecker"),
+            ([], environment, "env-factchecker", "env-chatbot"),
+            ([], {"FACTCHECKER_MODEL": "env-factchecker"}, "env-factchecker", "env-factchecker"),
+            ([], {"CHATBOT_MODEL": "env-chatbot"}, "gpt-4-0613", "env-chatbot"),
+            (["--engine", "cli-factchecker"], environment, "cli-factchecker", "env-chatbot"),
+            (["--chat-engine", "cli-chatbot"], environment, "env-factchecker", "cli-chatbot"),
+            (
+                ["--engine", "cli-factchecker", "--chat-engine", "cli-chatbot"],
+                environment,
+                "cli-factchecker",
+                "cli-chatbot",
+            ),
+        ]
+        for argv, model_environment, expected_engine, expected_chat_engine in cases:
+            with (
+                self.subTest(argv=argv, environment=model_environment),
+                patch.dict(os.environ, model_environment),
+                patch.object(sys, "argv", [str(APP), *argv]),
+            ):
+                self.app = AppTest.from_file(str(APP), default_timeout=10).run()
+                self.assert_app_ok()
+                self.send("Tell me about Japan.")
+                chat_call = self.chat.stream_chat_response.call_args
+                model = chat_call.kwargs.get("model") or chat_call.args[1]
+                self.assertEqual(model, expected_chat_engine)
+                self.check(self.assistants()[0]["id"], claim_result())
+                config = self.pipeline.run_factcheck.call_args.args[2]
+                self.assertEqual(config.engine, expected_engine)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ Create `.env` in the project root using [`.env.example`](.env.example) as a temp
 | Endpoint | `CHATBOT_ENDPOINT` | `FACTCHECKER_ENDPOINT` | Yes |
 | API key | `CHATBOT_API_KEY` | `FACTCHECKER_API_KEY` | Yes; use a dummy value for a local server without authentication |
 | API version | `CHATBOT_API_VERSION` | `FACTCHECKER_API_VERSION` | Only when API type is `azure` |
+| Model | `CHATBOT_MODEL` | `FACTCHECKER_MODEL` | Optional; see model selection below |
 
 With `API_TYPE=openai`, supply the complete API base URL, including its path: `https://api.openai.com/v1` for OpenAI, `http://localhost:8000/v1` for a compatible local server, or `https://your-resource.openai.azure.com/openai/v1` for an [Azure v1 endpoint](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle). The role's `API_VERSION` is ignored in this mode.
 
@@ -31,48 +32,61 @@ For example, use a local chatbot and an Azure fact-checker:
 CHATBOT_API_TYPE="openai"
 CHATBOT_ENDPOINT="http://localhost:8000/v1"
 CHATBOT_API_KEY="unused"
+CHATBOT_MODEL="your-local-model-id"
 
 FACTCHECKER_API_TYPE="azure"
 FACTCHECKER_ENDPOINT="https://your-resource.openai.azure.com"
 FACTCHECKER_API_KEY="your-factchecker-api-key"
 FACTCHECKER_API_VERSION="your-supported-api-version"
+FACTCHECKER_MODEL="your-factcheck-deployment-name"
 ```
 
-The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support tool calling. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection settings in `.env` or the environment.
+The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support tool calling. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection or model settings in `.env` or the environment.
 
-For compatibility, a role with none of its four prefixed connection variables set uses the shared legacy `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION` settings. Setting any prefixed connection variable requires a complete configuration for that role; missing values are never filled from the shared settings. Global `OPENAI_*` variables are not used as a fallback. Model selection uses CLI arguments, not environment variables.
+For compatibility, a role with none of its four prefixed connection variables set uses the shared legacy `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION` settings. Setting any prefixed connection variable requires a complete configuration for that role; missing values are never filled from the shared settings. Model variables alone do not disable this legacy connection fallback. Global `OPENAI_*` variables are not used as a fallback.
 
 ### Retrieval
 
-Retrieval requires Elasticsearch with existing search and metadata indexes:
+Retrieval requires an existing Elasticsearch search index containing `token_ids` (space-separated token IDs), `dataset_name` (source), and `iteration` (training step). Source details come directly from each search result.
 
-| Index | Document fields |
-| --- | --- |
-| Search | `token_ids`: space-separated token IDs; `dataset_name` and `iteration`: source details |
-| Metadata | `token_ids`: space-separated token IDs; `meta`: a JSON string or object |
+Configure retrieval with environment variables or `.env`:
 
-Set `--tokenizer_name` to the tokenizer used to build these indexes. The first fact-check downloads the tokenizer and embedding model from Hugging Face if they are not cached.
+| CLI argument | Environment variable | Default |
+| --- | --- | --- |
+| `--tokenizer_name` | `TOKENIZER_NAME` | `llm-jp/llm-jp-3-13b` |
+| `--es_host` | `ES_HOST` | `http://10.2.73.12:9200` |
+| `--es_dump_index` | `ES_DUMP_INDEX` | `llm-jp-corpus-v3` |
+
+CLI arguments take precedence over environment variables, followed by the defaults above. Existing process environment variables take precedence over `.env`; blank or whitespace-only values use the defaults. Restart Streamlit after changing these settings.
+
+Set `TOKENIZER_NAME` or `--tokenizer_name` to the tokenizer used to build the index. The first fact-check downloads the tokenizer and embedding model from Hugging Face if they are not cached.
 
 ## Run
 
+With the connection and model settings configured in `.env`, run:
+
 ```bash
-uv run --locked streamlit run src/serve.py -- \
-  --engine your-factcheck-deployment-name \
-  --chat-engine your-local-model-id
+uv run --locked streamlit run src/serve.py
 ```
 
-`--engine` selects the model for decomposition and verification through the fact-checker connection. `--chat-engine` selects the model for the chatbot connection; its value defaults to `--engine`. Use model IDs accepted by the endpoint in `openai` mode and deployment names in `azure` mode. Azure v1 endpoints also expect deployment names. The command above matches the mixed configuration example.
+Model selection uses the following precedence:
 
-Retrieval options can be supplied alongside the model arguments:
+| Role | Highest to lowest priority |
+| --- | --- |
+| Fact-checker | `--engine`, then `FACTCHECKER_MODEL`, then `gpt-4-0613` |
+| Chatbot | `--chat-engine`, then `CHATBOT_MODEL`, then the resolved fact-checker model |
+
+The app loads the project-root `.env` without overriding existing process environment variables. Blank or whitespace-only model variables count as unset. Use model IDs accepted by the endpoint in `openai` mode and deployment names in `azure` mode. Azure v1 endpoints also expect deployment names.
+
+Override model settings and supply retrieval options on the command line:
 
 ```bash
 uv run --locked streamlit run src/serve.py -- \
   --engine your-factcheck-deployment-name \
   --chat-engine your-local-model-id \
-  --es_host http://localhost:9200 \
-  --es_dump_index llm-jp-search-v1.0 \
-  --es_meta_index llm-jp-search-for-meta-v1.0 \
-  --tokenizer_name llm-jp/llm-jp-13b-v1.0 \
+  --es_host http://10.2.73.12:9200 \
+  --es_dump_index llm-jp-corpus-v3 \
+  --tokenizer_name llm-jp/llm-jp-3-13b \
   --num_evidences 3
 ```
 
@@ -86,9 +100,9 @@ uv run --locked streamlit run src/serve.py -- --mock
 
 `--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all five verdict labels, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
 
-Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and ten seconds per fact-check with the default evidence count, excluding UI overhead. Adjust the delay constants in `src/mock_backend.py` to change these timings.
+Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and eight seconds per fact-check with the default evidence count, excluding UI overhead. Adjust the delay constants in `src/mock_backend.py` to change these timings.
 
-Mock mode ignores model, endpoint, retrieval, and prompt-selection settings, except `--num_evidences`, which selects up to two available synthetic evidence passages per claim. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
+Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings, except `--num_evidences`, which selects up to two available synthetic evidence passages per claim. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
 
 ## Workflow
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Iterator
@@ -15,10 +14,9 @@ from verify import verify_claim
 @dataclass(frozen=True)
 class PipelineConfig:
     engine: str = "gpt-4-0613"
-    tokenizer_name: str = "llm-jp/llm-jp-13b-v1.0"
+    tokenizer_name: str = "llm-jp/llm-jp-3-13b"
     es_host: str = "http://localhost:9200"
-    es_dump_index: str = "llm-jp-search-v1.0"
-    es_meta_index: str = "llm-jp-search-for-meta-v1.0"
+    es_dump_index: str = "llm-jp-corpus-v3"
     num_evidences: int = 1
     embedding: str = "intfloat/multilingual-e5-base"
     decomposition_prompt: str | None = None
@@ -120,25 +118,6 @@ def run_factcheck(document: str, context: str | None, config: PipelineConfig) ->
                             }
                         )
         evidences = sorted(candidates, key=lambda item: item["score"], reverse=True)[: config.num_evidences]
-
-        if evidences:
-            yield PipelineEvent("metadata", f"{prefix}: retrieving source information…", index, total)
-        for evidence in evidences:
-            evidence_token_ids = tokenizer.encode(evidence["passage"], add_special_tokens=False)
-            meta_hits = search_documents(
-                es,
-                config.es_meta_index,
-                body={"query": {"match": {"token_ids": " ".join(map(str, evidence_token_ids))}}},
-                size=1,
-                max_concurrent_shard_requests=64,
-            )
-            meta = meta_hits[0]["_source"].get("meta", {}) if meta_hits else {}
-            if isinstance(meta, str):
-                try:
-                    meta = json.loads(meta)
-                except json.JSONDecodeError:
-                    meta = {"source_metadata": meta}
-            evidence["meta"] = meta if isinstance(meta, dict) else {"source_metadata": meta}
 
         for evidence_index, evidence in enumerate(evidences, 1):
             yield PipelineEvent(

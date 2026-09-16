@@ -6,6 +6,7 @@ import argparse
 import html
 import json
 import logging
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from chat import stream_chat_response
 from pipeline import PipelineConfig, run_factcheck
 
 logger = logging.getLogger(__name__)
+DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 LABELS = {
     "Supported": "supported",
@@ -42,19 +44,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--engine",
-        default="gpt-4-0613",
-        help="Model name or Azure deployment for the Factchecker; also the default Chatbot model.",
+        default=None,
+        help="Factchecker model or Azure deployment (overrides FACTCHECKER_MODEL; default: gpt-4-0613).",
     )
     parser.add_argument(
         "--chat-engine",
         "--chat_engine",
         default=None,
-        help="Optional Chatbot model name or Azure deployment (defaults to --engine).",
+        help="Chatbot model or Azure deployment (overrides CHATBOT_MODEL; defaults to the Factchecker model).",
     )
-    parser.add_argument("--tokenizer_name", "--tokenizer-name", default="llm-jp/llm-jp-13b-v1.0")
-    parser.add_argument("--es_host", "--es-host", default="http://localhost:9200")
-    parser.add_argument("--es_dump_index", "--es-dump-index", default="llm-jp-search-v1.0")
-    parser.add_argument("--es_meta_index", "--es-meta-index", default="llm-jp-search-for-meta-v1.0")
+    parser.add_argument(
+        "--tokenizer_name",
+        "--tokenizer-name",
+        type=str,
+        default=None,
+        help="Retrieval tokenizer (overrides TOKENIZER_NAME; default: llm-jp/llm-jp-3-13b).",
+    )
+    parser.add_argument(
+        "--es_host",
+        "--es-host",
+        type=str,
+        default=None,
+        help="Elasticsearch host (overrides ES_HOST; default: http://10.2.73.12:9200).",
+    )
+    parser.add_argument(
+        "--es_dump_index",
+        "--es-dump-index",
+        type=str,
+        default=None,
+        help="Search index (overrides ES_DUMP_INDEX; default: llm-jp-corpus-v3).",
+    )
     parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=1)
     parser.add_argument("--embedding", default="intfloat/multilingual-e5-base")
     parser.add_argument("--decomposition-prompt", "--decomposition_prompt", default=None)
@@ -65,7 +84,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use synthetic chat and fact-check results without API calls, Elasticsearch, or model downloads.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Whether to log debug messages.")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.mock:
+        from dotenv import load_dotenv
+
+        load_dotenv(DOTENV_PATH, override=False)
+        if args.engine is None:
+            args.engine = os.getenv("FACTCHECKER_MODEL", "").strip() or None
+        if args.chat_engine is None:
+            args.chat_engine = os.getenv("CHATBOT_MODEL", "").strip() or None
+    if args.engine is None:
+        args.engine = "gpt-4-0613"
+    for name, environment_variable, default in (
+        ("tokenizer_name", "TOKENIZER_NAME", "llm-jp/llm-jp-3-13b"),
+        ("es_host", "ES_HOST", "http://10.2.73.12:9200"),
+        ("es_dump_index", "ES_DUMP_INDEX", "llm-jp-corpus-v3"),
+    ):
+        if getattr(args, name) is None:
+            value = os.getenv(environment_variable, "").strip() if not args.mock else ""
+            setattr(args, name, value or default)
+    return args
 
 
 def _text(value: object) -> str:
@@ -145,7 +183,7 @@ def _progress(event) -> float:
     if event.stage == "preparation":
         return 0.12
     if event.total_claims:
-        fractions = {"retrieval": 0.08, "ranking": 0.25, "metadata": 0.55, "verification": 0.72, "claim_complete": 1.0}
+        fractions = {"retrieval": 0.08, "ranking": 0.25, "verification": 0.72, "claim_complete": 1.0}
         completed = max(event.current_claim - 1, 0) + fractions.get(event.stage, 0)
         return min(0.98, 0.15 + 0.83 * completed / event.total_claims)
     return 0.15
@@ -187,7 +225,6 @@ def _run_factcheck(response: dict, preceding_messages: list[dict], args: argpars
                 tokenizer_name=args.tokenizer_name,
                 es_host=args.es_host,
                 es_dump_index=args.es_dump_index,
-                es_meta_index=args.es_meta_index,
                 num_evidences=args.num_evidences,
                 embedding=args.embedding,
                 decomposition_prompt=args.decomposition_prompt,

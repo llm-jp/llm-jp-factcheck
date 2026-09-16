@@ -99,7 +99,7 @@ class MockModeUITest(unittest.TestCase):
             self.assertEqual(len(result["evidences"]), 1)
             for evidence in result["evidences"]:
                 self.assertEqual(evidence["dataset"], "Mock evidence")
-                self.assertIs(evidence["meta"]["mock"], True)
+                self.assertNotIn("meta", evidence)
                 labels.add(evidence["verification"]["label"])
         self.assertEqual(labels, LABELS)
 
