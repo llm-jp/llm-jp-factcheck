@@ -151,7 +151,8 @@ h1, .app-header h1 {
 .verdict { display: inline-block; padding: 0.32rem 0.62rem; border: 1px solid transparent; border-radius: 6px; font-size: 0.76rem; font-weight: 650; line-height: 1.45; }
 .verdict.supported { color: #12674e; background: #eaf6ef; border-color: #d8ecdf; }
 .verdict.partially-supported { color: #337668; background: #eff7f3; border-color: #e0ece5; }
-.verdict.partially-refuted { color: #906015; background: #fff7e8; border-color: #f4e8ce; }
+.verdict.inferentially-supported { color: #276884; background: #eef7fb; border-color: #dcecf3; }
+.verdict.inferentially-refuted { color: #906015; background: #fff7e8; border-color: #f4e8ce; }
 .verdict.refuted { color: #a04351; background: #fcf0f2; border-color: #f2dfe3; }
 .verdict.nei { color: #5e6d82; background: #eff3f8; border-color: #e3e9f1; }
 .section-label { color: #728299; font-size: 0.71rem; font-weight: 650; margin: 0.4rem 0 0.4rem; }

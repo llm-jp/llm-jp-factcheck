@@ -31,7 +31,7 @@ class _Fixture:
 _FIXTURES = (
     _Fixture(
         "Northstar Museum opened in 2012.",
-        "Supported",
+        "Fully supported",
         (
             "Fictional opening record: Northstar Museum first opened to visitors in 2012.",
             "Fictional anniversary note: Northstar Museum celebrated ten years since its 2012 opening in 2022.",
@@ -49,21 +49,21 @@ _FIXTURES = (
     ),
     _Fixture(
         "Northstar Museum has a cafe and a gift shop.",
-        "Partially refuted",
+        "Fully refuted",
         (
             "Fictional facilities list: Northstar Museum has a cafe. It does not have a gift shop.",
             "Fictional floor plan: Northstar Museum includes a cafe; the museum has no gift shop.",
         ),
-        "The sample confirms the cafe but contradicts the gift shop, refuting one part of the claim.",
+        "The explicit contradiction about the gift shop refutes the claim, even though the cafe is confirmed.",
     ),
     _Fixture(
         "Northstar Museum is closed on Mondays.",
-        "Refuted",
+        "Inferentially refuted",
         (
-            "Fictional weekly schedule: Northstar Museum is open every Monday.",
-            "Fictional visitor notice: Northstar Museum welcomes visitors on Mondays and is closed on Tuesdays.",
+            "Fictional weekly schedule: Northstar Museum is open every weekday.",
+            "Fictional visitor notice: Northstar Museum welcomes visitors on all weekdays.",
         ),
-        "The sample directly contradicts the claim by stating that the museum is open on Mondays.",
+        "Knowing that Monday is a weekday, the schedule implies that the museum is open on Mondays.",
     ),
     _Fixture(
         "The director of Northstar Museum is Morgan Vale.",
@@ -73,6 +73,15 @@ _FIXTURES = (
             "Fictional visitor guide: Northstar Museum provides lockers for visitors' bags.",
         ),
         "The sample describes visitor facilities and provides no information about the museum's director.",
+    ),
+    _Fixture(
+        "Northstar Museum opened before 2015.",
+        "Inferentially supported",
+        (
+            "Fictional anniversary notice: Northstar Museum marked its tenth anniversary in 2022.",
+            "Fictional celebration record: Northstar Museum celebrated ten years of operation in 2022.",
+        ),
+        "A tenth anniversary in 2022 implies an opening in 2012, which is before 2015.",
     ),
     _Fixture("Northstar Museum is wonderful.", "", (), "", is_checkworthy=False),
 )

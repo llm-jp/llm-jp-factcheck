@@ -1,6 +1,6 @@
 # LLM-jp Factcheck
 
-A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict and rationale. Users can inspect the evidence passages, their sources, and the associated training steps as results arrive.
+A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict. Users can inspect the evidence passages, their sources, and the associated training steps as results arrive.
 
 ## Setup
 
@@ -43,7 +43,7 @@ FACTCHECKER_MODEL="your-factcheck-deployment-name"
 
 The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) through Chat Completions with `response_format.type=json_schema` and `strict=true`. This requirement applies to OpenAI-compatible servers and Azure deployments as well. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection or model settings in `.env` or the environment.
 
-Decomposition, check-worthiness, and verification each send a JSON Schema and read the JSON object from the assistant message content. All schema fields are required, extra fields are forbidden, and verification labels are constrained to the five supported values. Refusals, incomplete responses, invalid JSON, and invalid values are reported as errors. Unsupported endpoints are not retried with function calling or a weaker output format.
+Decomposition, check-worthiness, and verification each send a JSON Schema and read the JSON object from the assistant message content. All schema fields are required, extra fields are forbidden, and verification labels are constrained to the six supported values. Refusals, incomplete responses, invalid JSON, and invalid values are reported as errors. Unsupported endpoints are not retried with function calling or a weaker output format.
 
 For compatibility, a role with none of its four prefixed connection variables set uses the shared legacy `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION` settings. Setting any prefixed connection variable requires a complete configuration for that role; missing values are never filled from the shared settings. Model variables alone do not disable this legacy connection fallback. Global `OPENAI_*` variables are not used as a fallback.
 
@@ -105,7 +105,7 @@ After `uv sync --locked`, try the interface without API credentials, Elasticsear
 uv run --locked streamlit run src/serve.py -- --mock
 ```
 
-`--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all five verdict labels, a non-check-worthy claim that is skipped, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
+`--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all six verdict labels, a non-check-worthy claim that is skipped, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
 
 Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and three seconds per fact-check with the default evidence count and concurrency, excluding UI overhead. Mock check-worthiness, retrieval, and verification use the same bounded parallel execution as live requests. Adjust the delay constants in `src/mock_backend.py` to change these timings.
 
@@ -185,20 +185,25 @@ for claim in claims:
         model="your-factcheck-model-or-deployment",
         prompt_path="prompts/verification.json",
     )
-    # The result contains "label" and "rationale".
+    # The result contains an English "label".
 ```
 
-JSON Schemas in Python define the output contract: decomposition returns a list of claim strings, check-worthiness reads a single boolean `label` and returns that boolean, and verification returns `label` and `rationale`. Application validation also rejects invalid values. Prompt files control instructions and examples independently of these schemas. Custom prompts should request JSON output rather than function calls. Verification accepts exactly five labels:
+JSON Schemas in Python define the output contract: decomposition returns a list of claim strings and check-worthiness reads a single boolean `label`. Base verification requests only one Japanese `label` from the model and maps it to an English label for the application. No rationale, chain-of-thought instruction, or few-shot demonstration is requested. Application validation rejects extra fields and invalid labels. The UI displays a rationale only when a result provides one, such as the static mock fixtures. Prompt files control instructions independently of the schemas and remain editable.
 
-- `Supported`
+Verification returns one of these six English labels:
+
+- `Fully supported`
+- `Inferentially supported`
 - `Partially supported`
-- `Partially refuted`
-- `Refuted`
+- `Fully refuted`
+- `Inferentially refuted`
 - `Not enough information`
+
+The model's JSON label must be one of `完全支持`, `推定支持`, `部分支持`, `完全否定`, `推定否定`, or `不明`, respectively. There is no partially-refuted category: an explicit contradiction about part of a claim is classified as fully refuted. Inferential support and refutation use the paper's definitions of implicit inference and background knowledge.
 
 The default decomposition prompt uses **guideline + 8-shot**, based on the rule/example/explanation guidelines and eight development examples from the paper's `experiment/lrec2026` branch. The 13 guideline sections and their instructional examples are retained in Japanese to preserve the source wording. Demonstration outputs use the application's JSON Schema contract. Conversation context is used only to resolve references; check-worthiness remains a separate step. The source revision, example IDs, and file paths are recorded in [evaluations/decomposition_8shot_source.json](evaluations/decomposition_8shot_source.json). Edit `prompts/decomposition_8shot.json` to change the default instructions. The zero-shot variant remains available in `prompts/decomposition.json`.
 
-The paper does not define this application's five-label verification scheme. The bundled verification criteria remain provisional and can be replaced independently.
+Verification uses the **base** prompt from `feat/verdict_prediction`, following [Masano et al. (ACL SRW 2026)](https://aclanthology.org/2026.acl-srw.99/). Its Japanese task and label definitions are retained; the original plain-label output is adapted to Structured Outputs. The source revision and paths are recorded in [evaluations/verification_source.json](evaluations/verification_source.json). Edit `prompts/verification.json` to change these instructions.
 
 ## Evaluate claim decomposition
 
@@ -237,6 +242,27 @@ The output directory contains the prompt snapshot, gold data, protocol and SHA-2
 Matching uses the reference Hungarian implementation, including its tie resolution. Different optimal assignments can have the same total similarity but different numbers of pairs above the threshold. If only `src/claim_metrics.py` changes, use `--score-only --refresh-metrics` to re-score existing predictions; the previous scoring protocol is preserved in `previous_scoring_protocol.json`. Changes to the model, prompt, dataset, generation code, or dependency versions still require a separate output directory.
 
 These results evaluate the application's configured model and Structured Outputs. The paper used GPT-4o, while this application defaults to GPT-5.4 and provider-default sampling. The prompt's output wrapper and handling of application context also differ from the original experimental runner. Treat these as an evaluation using the paper's guidelines and metrics, not an exact replication of its published model scores. Exact matching preserves the dataset's original whitespace and punctuation; the application's returned predictions have outer whitespace stripped as in normal use.
+
+## Evaluate base verification
+
+The completed GPT-5.4 base evaluation achieved accuracy **0.6279**, macro precision **0.3990**, macro recall **0.4857**, and macro F1 **0.4000**, averaged over three runs. See the [evaluation report](evaluations/verification_base.md) for per-label results, API failures, and comparison conditions, and [machine-readable scores](evaluations/verification_base.json) for the full metrics.
+
+```bash
+uv run --locked --group evaluation python scripts/evaluate_verification.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --model gpt-5.4-2026-03-05 \
+  --output result/verification-base
+```
+
+The protocol follows the paper's three-run AIO test evaluation. From 6,824 test pairs, 1,142 pairs whose evidence is the original LLM input question are excluded, leaving 5,682 pairs. Exclusion compares evidence with the corresponding question after trimming outer whitespace. Gold labels use the six paper categories; `完全矛盾` and `推定矛盾` are normalized to the matching refutation categories. There is no new decomposition, claim selection, or retrieval during this evaluation.
+
+Metrics are pair-level accuracy and macro precision, recall, and F1 over a fixed set of six labels, with zero-division scores set to zero. Scores are averaged across three independent prediction runs; per-label metrics and confusion matrices are also saved. API failures, refusals, and incomplete outputs are explicit failed predictions counted as incorrect. Missing pairs are never silently dropped.
+
+The model and Factchecker connection are configured as for decomposition evaluation. `--runs` defaults to `3`, `--max-concurrency` to `8`, and `--request-timeout` to `60` seconds. `--limit N` marks a smoke-test subset. Each result is appended to a JSONL checkpoint, and rerunning the command resumes unprocessed pairs. `--retry-errors` retries only failed pairs; use it only when a transient failure should be retried. `--score-only` recomputes metrics without model requests. Successful predictions are preserved across retries. Changed prompts, data, models, or implementation hashes require a new output directory.
+
+The pinned branch also contains three saved GPT-4o base runs. Their scores are recomputed separately using their recorded gold labels. Those files contain 5,681 pairs: ID 7006 is absent, and three evidence passages differ from the current test data. These discrepancies are recorded in `reference_scores.json`; the current evaluation retains the extra valid pair and uses the pinned test file's evidence. The paper's GPT-4o results and the current model's results therefore have documented model, output-format, and small data differences.
+
+Snapshots, hashes, predictions, per-run scores, reference scores, and a summary are saved under the selected output directory. The main metric implementation is checked against scikit-learn, as used by the reference evaluator. No Elasticsearch instance is needed.
 
 ## Development
 

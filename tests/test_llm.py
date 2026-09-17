@@ -63,29 +63,30 @@ class LLMTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     decompose.decompose_document_into_claims("Text", "deployment")
 
-    def test_accepts_each_of_the_five_labels_for_one_evidence(self):
-        labels = ("Supported", "Partially supported", "Partially refuted", "Refuted", "Not enough information")
+    def test_accepts_six_japanese_labels_and_returns_english_without_rationale(self):
+        labels = (
+            "Fully supported",
+            "Inferentially supported",
+            "Partially supported",
+            "Fully refuted",
+            "Inferentially refuted",
+            "Not enough information",
+        )
         self.assertEqual(verify.VERIFICATION_LABELS, labels)
         mocked, getter = self.mock_client(verify, None)
-        for label in labels:
+        for raw_label, label in verify.MODEL_LABELS.items():
             with self.subTest(label=label):
                 getter.reset_mock()
-                mocked.chat.completions.create.return_value = response(
-                    {"label": label, "rationale": " Evidence-based explanation. "}
-                )
-                self.assertEqual(
-                    verify.verify_claim("Claim A", "Evidence B", "deployment"),
-                    {"label": label, "rationale": "Evidence-based explanation."},
-                )
+                mocked.chat.completions.create.return_value = response({"label": raw_label})
+                self.assertEqual(verify.verify_claim("Claim A", "Evidence B", "deployment"), {"label": label})
                 getter.assert_called_once_with("factchecker")
                 kwargs = mocked.chat.completions.create.call_args.kwargs
                 self.assertEqual(kwargs["model"], "deployment")
                 self.assertIn("Claim A", kwargs["messages"][1]["content"])
                 self.assertIn("Evidence B", kwargs["messages"][1]["content"])
-                self.assertEqual(kwargs["response_format"]["json_schema"]["name"], "verification")
-                self.assertEqual(
-                    kwargs["response_format"]["json_schema"]["schema"]["properties"]["label"]["enum"], list(labels)
-                )
+                schema = kwargs["response_format"]["json_schema"]["schema"]
+                self.assertEqual(schema["properties"]["label"]["enum"], list(verify.MODEL_LABELS))
+                self.assertEqual(set(schema["properties"]), {"label"})
 
     def test_empty_evidence_is_nei_without_api_call(self):
         _, getter = self.mock_client(verify, None)
@@ -107,12 +108,13 @@ class LLMTests(unittest.TestCase):
         payloads = [
             {},
             [],
-            {"label": True, "rationale": "Old boolean"},
-            {"label": None, "rationale": "Old null"},
-            {"label": "supported", "rationale": "Wrong case"},
-            {"label": "Supported", "rationale": None},
-            {"label": "Supported", "rationale": " "},
-            {"label": "Supported", "rationale": "Explanation", "extra": True},
+            {"label": True},
+            {"label": None},
+            {"label": "supported"},
+            {"label": "Fully supported"},
+            {"label": "完全矛盾"},
+            {"label": "完全支持", "rationale": "Unrequested reasoning"},
+            {"label": "完全支持", "extra": True},
         ]
         for payload in payloads:
             with self.subTest(payload=payload):
@@ -210,7 +212,7 @@ class LLMTests(unittest.TestCase):
             (checkworthy, {"label": True}, lambda: checkworthy.identify_checkworthiness("Claim", "deployment")),
             (
                 verify,
-                {"label": "Supported", "rationale": "Reason"},
+                {"label": "完全支持"},
                 lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
             ),
         ]
@@ -246,7 +248,7 @@ class LLMTests(unittest.TestCase):
             (
                 verify,
                 "verification",
-                {"label": "Supported", "rationale": "Reason"},
+                {"label": "完全支持"},
                 lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
             ),
         ]
@@ -267,7 +269,7 @@ class LLMTests(unittest.TestCase):
                 self.assertEqual(set(definition["schema"]["properties"]), set(payload))
 
     def test_custom_prompts_reload_between_invocations(self):
-        mocked, _ = self.mock_client(verify, response({"label": "Supported", "rationale": "Reason"}))
+        mocked, _ = self.mock_client(verify, response({"label": "完全支持"}))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.json"
             for instruction in ["First instructions", "Replaced instructions"]:

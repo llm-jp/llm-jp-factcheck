@@ -8,26 +8,27 @@ from utils import parse_json_response
 
 DEFAULT_PROMPT_PATH = PROMPT_DIR / "verification.json"
 VERIFICATION_LABELS = (
-    "Supported",
+    "Fully supported",
+    "Inferentially supported",
     "Partially supported",
-    "Partially refuted",
-    "Refuted",
+    "Fully refuted",
+    "Inferentially refuted",
     "Not enough information",
 )
+MODEL_LABELS = dict(zip(("完全支持", "推定支持", "部分支持", "完全否定", "推定否定", "不明"), VERIFICATION_LABELS))
 
 RESPONSE_FORMAT = {
     "type": "json_schema",
     "json_schema": {
         "name": "verification",
         "strict": True,
-        "description": "Verify one claim against one evidence passage using the five specified labels.",
+        "description": "Assign one of the six verdict labels to one claim-evidence pair.",
         "schema": {
             "type": "object",
             "properties": {
-                "rationale": {"type": "string", "description": "Explain the label using the supplied evidence."},
-                "label": {"type": "string", "enum": list(VERIFICATION_LABELS)},
+                "label": {"type": "string", "enum": list(MODEL_LABELS)},
             },
-            "required": ["rationale", "label"],
+            "required": ["label"],
             "additionalProperties": False,
         },
     },
@@ -41,7 +42,7 @@ def verify_claim(
     *,
     prompt_path: str | Path | None = None,
 ) -> dict[str, str]:
-    """Predict a label and rationale for a single claim–evidence pair."""
+    """Predict a base verdict without requesting reasoning or demonstrations."""
     if not isinstance(claim, str) or not claim.strip():
         raise ValueError("claim must be a nonempty string.")
     if not isinstance(evidence, str):
@@ -59,12 +60,9 @@ def verify_claim(
         response_format=RESPONSE_FORMAT,
     )
     payload = parse_json_response(response)
-    if set(payload) != {"label", "rationale"}:
-        raise ValueError("Verification response must contain exactly 'label' and 'rationale'.")
+    if set(payload) != {"label"}:
+        raise ValueError("Verification response must contain exactly 'label'.")
     label = payload["label"]
-    rationale = payload["rationale"]
-    if not isinstance(label, str) or label not in VERIFICATION_LABELS:
-        raise ValueError(f"Verification response 'label' must be one of {VERIFICATION_LABELS}.")
-    if not isinstance(rationale, str) or not rationale.strip():
-        raise ValueError("Verification response 'rationale' must be a nonempty string.")
-    return {"label": label, "rationale": rationale.strip()}
+    if not isinstance(label, str) or label not in MODEL_LABELS:
+        raise ValueError(f"Verification response 'label' must be one of {tuple(MODEL_LABELS)}.")
+    return {"label": MODEL_LABELS[label]}

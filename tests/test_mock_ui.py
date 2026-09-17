@@ -15,7 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "serve.py"
 sys.path.insert(0, str(ROOT / "src"))
 
-LABELS = {"Supported", "Partially supported", "Partially refuted", "Refuted", "Not enough information"}
+LABELS = {
+    "Fully supported",
+    "Inferentially supported",
+    "Partially supported",
+    "Inferentially refuted",
+    "Fully refuted",
+    "Not enough information",
+}
 MOCK_NOTICE = "Mock mode: chat responses and fact-check results use synthetic data. No external services are called."
 
 
@@ -102,9 +109,9 @@ class MockModeUITest(unittest.TestCase):
     def assert_synthetic_results(self, run):
         self.assertIs(run["mock"], True)
         self.assertEqual(run["state"], "complete")
-        self.assertEqual(len(run["claims"]), 6)
-        self.assertEqual(len(run["results"]), 6)
-        self.assertEqual(sum(result["is_checkworthy"] for result in run["results"]), 5)
+        self.assertEqual(len(run["claims"]), 7)
+        self.assertEqual(len(run["results"]), 7)
+        self.assertEqual(sum(result["is_checkworthy"] for result in run["results"]), 6)
         labels = set()
         for result in run["results"]:
             self.assertIs(result["mock"], True)

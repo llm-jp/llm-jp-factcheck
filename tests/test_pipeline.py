@@ -31,7 +31,10 @@ class PipelineTests(unittest.TestCase):
 
     @staticmethod
     def verdict(claim, evidence, **kwargs):
-        return {"label": "Supported" if evidence == "短文" else "Refuted", "rationale": f"{claim} / {evidence}"}
+        return {
+            "label": "Fully supported" if evidence == "短文" else "Fully refuted",
+            "rationale": f"{claim} / {evidence}",
+        }
 
     @staticmethod
     def hit(token_ids="1 2", dataset="test-corpus", training_step=10):
@@ -57,8 +60,8 @@ class PipelineTests(unittest.TestCase):
             ],
             any_order=True,
         )
-        self.assertEqual(results[0]["evidences"][0]["verification"]["label"], "Supported")
-        self.assertEqual(results[0]["evidences"][1]["verification"]["label"], "Refuted")
+        self.assertEqual(results[0]["evidences"][0]["verification"]["label"], "Fully supported")
+        self.assertEqual(results[0]["evidences"][1]["verification"]["label"], "Fully refuted")
         self.assertEqual(self.search.call_count, 2)
         for search_call in self.search.call_args_list:
             self.assertEqual(search_call.args, (self.load_es.return_value, self.config.es_dump_index))
@@ -362,7 +365,7 @@ class PipelineTests(unittest.TestCase):
             update = next(event for event in stream if event.stage == "verification" and event.claim_update is not None)
             self.assertIsNone(update.result)
             self.assertNotIn("verification", update.claim_update["evidences"][0])
-            self.assertEqual(update.claim_update["evidences"][1]["verification"]["label"], "Refuted")
+            self.assertEqual(update.claim_update["evidences"][1]["verification"]["label"], "Fully refuted")
         finally:
             release_first.set()
         remaining = list(stream)
@@ -415,7 +418,7 @@ class PipelineTests(unittest.TestCase):
                     raise TimeoutError("Verification requests ran sequentially")
                 with lock:
                     completion_order.append(pair)
-            return {"label": "Supported", "rationale": f"{claim}: {passage}"}
+            return {"label": "Fully supported", "rationale": f"{claim}: {passage}"}
 
         self.verify.side_effect = verify
         events = list(run_factcheck("Response", None, replace(self.config, max_concurrency=4)))
@@ -438,7 +441,7 @@ class PipelineTests(unittest.TestCase):
                 if not first_displayed.wait(2):
                     raise TimeoutError("First completed claim was not emitted")
                 raise RuntimeError("Verification failed")
-            return {"label": "Supported", "rationale": "Completed first claim"}
+            return {"label": "Fully supported", "rationale": "Completed first claim"}
 
         self.verify.side_effect = verify
         completed = []
@@ -448,7 +451,7 @@ class PipelineTests(unittest.TestCase):
                     completed.append(event.result)
                     first_displayed.set()
         self.assertEqual([result["claim"] for result in completed], ["First claim"])
-        self.assertEqual(completed[0]["evidences"][0]["verification"]["label"], "Supported")
+        self.assertEqual(completed[0]["evidences"][0]["verification"]["label"], "Fully supported")
 
 
 if __name__ == "__main__":

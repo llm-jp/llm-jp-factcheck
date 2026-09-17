@@ -20,6 +20,7 @@ dev = [
 evaluation = [
     "mecab-python3>=1.0.10,<2",
     "numpy>=1.26,<3",
+    "scikit-learn>=1.6,<2",
     "scipy>=1.14,<2",
     "unidic-lite==1.0.8",
 ]

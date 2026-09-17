@@ -78,7 +78,7 @@ class ClientTests(unittest.TestCase):
             payloads = {
                 "decomposition": {"claims": ["Kyoto is in Japan."]},
                 "checkworthiness": {"label": True},
-                "verification": {"label": "Supported", "rationale": "The evidence states the claim."},
+                "verification": {"label": "完全支持"},
             }
             message["content"] = json.dumps(payloads[schema_name])
         return httpx.Response(
@@ -152,7 +152,7 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(answer, "Kyoto is in Japan.")
                 self.assertEqual(claims, [answer])
                 self.assertIs(label, True)
-                self.assertEqual(verdict["label"], "Supported")
+                self.assertEqual(verdict["label"], "Fully supported")
                 self.assertEqual(len(self.requests), 4)
                 self.assert_route(self.requests[0], "chatbot", "openai", "chat-model")
                 self.assertNotIn("response_format", json.loads(self.requests[0].content))

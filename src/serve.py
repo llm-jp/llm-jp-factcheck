@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 LABELS = {
-    "Supported": "supported",
+    "Fully supported": "supported",
+    "Inferentially supported": "inferentially-supported",
     "Partially supported": "partially-supported",
-    "Partially refuted": "partially-refuted",
-    "Refuted": "refuted",
+    "Inferentially refuted": "inferentially-refuted",
+    "Fully refuted": "refuted",
     "Not enough information": "nei",
 }
 
@@ -187,11 +188,12 @@ def _render_result(result: dict, index: int, *, stopped: bool = False, paused: b
                     )
                 else:
                     st.markdown(_badge(verification["label"]), unsafe_allow_html=True)
-                    st.markdown(
-                        f'<div class="section-label">Rationale</div>'
-                        f'<p class="rationale">{_text(verification["rationale"])}</p>',
-                        unsafe_allow_html=True,
-                    )
+                    if verification.get("rationale"):
+                        st.markdown(
+                            f'<div class="section-label">Rationale</div>'
+                            f'<p class="rationale">{_text(verification["rationale"])}</p>',
+                            unsafe_allow_html=True,
+                        )
             with st.expander("Evidence passage", expanded=False):
                 st.markdown(
                     f'<div class="evidence-passage">{_text(evidence["passage"])}</div>',

@@ -12,7 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import mock_backend
 from pipeline import PipelineConfig
 
-LABELS = ("Supported", "Partially supported", "Partially refuted", "Refuted", "Not enough information")
+LABELS = (
+    "Fully supported",
+    "Partially supported",
+    "Fully refuted",
+    "Inferentially refuted",
+    "Not enough information",
+    "Inferentially supported",
+)
 
 
 class MockBackendTests(unittest.TestCase):
@@ -60,9 +67,9 @@ class MockBackendTests(unittest.TestCase):
         self.results("\n".join(mock_backend.MOCK_CLAIMS), count=100)
         factcheck_delay = sum(call.args[0] for call in self.sleep.call_args_list)
         self.assertGreaterEqual(factcheck_delay, 8)
-        self.assertLess(factcheck_delay, 15)
+        self.assertLess(factcheck_delay, 17)
 
-    def test_each_claim_has_its_own_coherent_five_label_fixture(self):
+    def test_each_claim_has_its_own_coherent_six_label_fixture(self):
         results = self.results(self.response())
         self.assertEqual([result["claim"] for result in results], list(mock_backend.MOCK_CLAIMS))
         self.assertFalse(results[-1]["is_checkworthy"])
@@ -82,7 +89,7 @@ class MockBackendTests(unittest.TestCase):
         self.assertIn("2012", results[0]["evidences"][0]["passage"])
         self.assertIn("does not list a closing time", results[1]["evidences"][0]["passage"])
         self.assertIn("does not have a gift shop", results[2]["evidences"][0]["passage"])
-        self.assertIn("open every Monday", results[3]["evidences"][0]["passage"])
+        self.assertIn("open every weekday", results[3]["evidences"][0]["passage"])
         self.assertNotIn("Morgan Vale", results[4]["evidences"][0]["passage"])
 
     def test_checks_only_selected_claims_in_source_order(self):
@@ -91,7 +98,7 @@ class MockBackendTests(unittest.TestCase):
         self.assertEqual([result["claim"] for result in results], selected)
         self.assertEqual(
             [result["evidences"][0]["verification"]["label"] for result in results],
-            ["Refuted", "Partially supported"],
+            ["Inferentially refuted", "Partially supported"],
         )
         self.assertNotEqual(results[0]["evidences"][0]["passage"], results[1]["evidences"][0]["passage"])
 
@@ -124,15 +131,15 @@ class MockBackendTests(unittest.TestCase):
         self.sleep.assert_not_called()
         remaining = list(events)
         self.assertEqual(remaining[-1].stage, "complete")
-        self.assertEqual(remaining[-1].current_claim, 6)
-        self.assertEqual(remaining[-1].total_claims, 6)
+        self.assertEqual(remaining[-1].current_claim, 7)
+        self.assertEqual(remaining[-1].total_claims, 7)
         self.assertIn("checkworthiness", [event.stage for event in remaining])
-        self.assertEqual(sum(event.stage == "verification" and event.current_claim > 0 for event in remaining), 10)
-        for index in range(1, 6):
+        self.assertEqual(sum(event.stage == "verification" and event.current_claim > 0 for event in remaining), 12)
+        for index in range(1, 7):
             stages = [event.stage for event in remaining if event.current_claim == index and event.stage != "complete"]
             self.assertEqual(stages, ["checkworthiness", "retrieval", "verification", "verification", "claim_complete"])
         self.assertEqual(
-            [event.stage for event in remaining if event.current_claim == 6 and event.stage != "complete"],
+            [event.stage for event in remaining if event.current_claim == 7 and event.stage != "complete"],
             ["checkworthiness", "claim_complete"],
         )
 
@@ -172,7 +179,7 @@ class MockBackendTests(unittest.TestCase):
             mocks.append(patcher.start())
             self.addCleanup(patcher.stop)
         with patch.object(socket, "socket", side_effect=AssertionError("Unexpected network access")):
-            self.assertEqual(len(self.results(self.response(), count=2)), 6)
+            self.assertEqual(len(self.results(self.response(), count=2)), 7)
         for mocked in mocks:
             mocked.assert_not_called()
 

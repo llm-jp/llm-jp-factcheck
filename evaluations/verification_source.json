@@ -1,0 +1,13 @@
+{
+  "repository": "llm-jp-evidence-verification-dataset",
+  "branch": "feat/verdict_prediction",
+  "revision": "cecf2a1d2c05a71dbc8460a1476ba051d18db807",
+  "prompt_source": "scripts/prompts/verdict_prediction/6class_base_1224.txt",
+  "test_source": "data/verdict_prediction/AIO_test.json",
+  "question_source": "data/claim_decomposition/AIO.json",
+  "reference_predictions": [
+    "data/results/verdict_predicted/new/result_6class_base_1224_4.json",
+    "data/results/verdict_predicted/new/result_6class_base_1224_5.json",
+    "data/results/verdict_predicted/new/result_6class_base_1224_6.json"
+  ]
+}

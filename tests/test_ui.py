@@ -19,7 +19,14 @@ from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "serve.py"
-LABELS = ["Supported", "Partially supported", "Partially refuted", "Refuted", "Not enough information"]
+LABELS = [
+    "Fully supported",
+    "Inferentially supported",
+    "Partially supported",
+    "Inferentially refuted",
+    "Fully refuted",
+    "Not enough information",
+]
 
 
 def load_ui_module():
@@ -56,7 +63,7 @@ def claim_result(claim="Tokyo is Japan's capital.", labels=None):
                 "training_step": 123,
                 "verification": {"label": label, "rationale": f"Reason {i}"},
             }
-            for i, label in enumerate(labels or ["Supported"], 1)
+            for i, label in enumerate(labels or ["Fully supported"], 1)
         ],
     }
 
@@ -277,7 +284,7 @@ class ChatUITest(unittest.TestCase):
         self.send("Second question", answer)
         first, second = self.assistants()
         self.assertNotEqual(first["id"], second["id"])
-        first_run = deepcopy(self.check(first["id"], claim_result(labels=["Supported"])))
+        first_run = deepcopy(self.check(first["id"], claim_result(labels=["Fully supported"])))
         second_run = deepcopy(self.check(second["id"], claim_result(labels=["Partially supported"])))
         checks = self.app.session_state["factchecks"]
         self.assertEqual(set(checks), {first["id"], second["id"]})
@@ -300,9 +307,9 @@ class ChatUITest(unittest.TestCase):
         self.send("Tell me about Japan.")
         self.send("Tell me about France.", "Paris is France's capital.")
         first, second = self.assistants()
-        first_run = deepcopy(self.check(first["id"], claim_result(first["content"], labels=["Supported"])))
+        first_run = deepcopy(self.check(first["id"], claim_result(first["content"], labels=["Fully supported"])))
         second_run = deepcopy(self.check(second["id"], claim_result(second["content"])))
-        previous = self.check(first["id"], claim_result(first["content"], labels=["Refuted"]))
+        previous = self.check(first["id"], claim_result(first["content"], labels=["Fully refuted"]))
         self.assertEqual(previous, first_run)
         self.assertTrue(self.app.get("dialog")[0].proto.dialog.is_open)
         self.assertEqual(self.pipeline.run_factcheck.call_count, 2)
@@ -311,7 +318,7 @@ class ChatUITest(unittest.TestCase):
         self.assert_app_ok()
         rerun = self.app.session_state["factchecks"][first["id"]]
         self.assertEqual(len(rerun["results"]), 1)
-        self.assertEqual(rerun["results"][0]["evidences"][0]["verification"]["label"], "Refuted")
+        self.assertEqual(rerun["results"][0]["evidences"][0]["verification"]["label"], "Fully refuted")
         self.assertEqual(self.app.session_state["factchecks"][second["id"]], second_run)
         self.assertEqual(self.chat.stream_chat_response.call_count, 2)
         self.assertEqual(self.pipeline.run_factcheck.call_count, 3)
@@ -394,7 +401,7 @@ class ChatUITest(unittest.TestCase):
         self.send("Tell me about Japan.")
         message = self.assistants()[0]
         run = self.check(message["id"], claim_result(labels=LABELS))
-        self.assertEqual(len(run["results"][0]["evidences"]), 5)
+        self.assertEqual(len(run["results"][0]["evidences"]), len(LABELS))
         content = self.rendered_text()
         for label in LABELS:
             self.assertIn(f">{label}</span>", content)
@@ -409,12 +416,21 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(evidence["training_step"], 123)
         self.assertNotIn("meta", evidence)
         passages = [expander for expander in self.app.expander if expander.label == "Evidence passage"]
-        self.assertEqual(len(passages), 5)
+        self.assertEqual(len(passages), len(LABELS))
         for passage in passages:
             self.assertEqual([text.value for text in passage.text], ["Source: test dataset", "Training step: 123"])
         self.assertTrue(all(not passage.proto.expanded for passage in passages))
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
+
+    def test_base_verdict_without_rationale_renders_without_an_empty_section(self):
+        self.send("Tell me about Japan.")
+        message = self.assistants()[0]
+        result = claim_result(labels=["Inferentially supported"])
+        result["evidences"][0]["verification"].pop("rationale")
+        self.check(message["id"], result)
+        self.assertIn("Inferentially supported", self.rendered_text())
+        self.assertNotIn("Rationale", self.rendered_text())
 
     def test_generation_error_keeps_user_and_retry_does_not_duplicate_it(self):
         def broken_stream(*_args, **_kwargs):
@@ -459,7 +475,7 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(len(run["results"]), 1)
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
-        self.assertEqual(run["results"][0]["evidences"][0]["verification"]["label"], "Supported")
+        self.assertEqual(run["results"][0]["evidences"][0]["verification"]["label"], "Fully supported")
         self.assertIn("Verification connection failed", run["error"])
         self.assertTrue(any("Verification connection failed" in error.value for error in self.app.error))
         self.assertEqual(self.app.session_state["messages"], saved_messages)
@@ -600,7 +616,7 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(self.rendered_text().count('class="claim-spinner"'), 1)
 
     def test_partial_pair_verdict_and_later_claim_survive_failure_in_original_positions(self):
-        partial = claim_result("First claim", ["Supported", "Refuted"])
+        partial = claim_result("First claim", ["Fully supported", "Fully refuted"])
         partial["status"] = "verification"
         del partial["evidences"][0]["verification"]
         finished = claim_result("Second claim")
@@ -619,8 +635,8 @@ class ChatUITest(unittest.TestCase):
         text = self.rendered_text()
         self.assertLess(text.index("First claim"), text.index("Second claim"))
         self.assertIn("1 / 2 claims processed", text)
-        self.assertIn("Refuted", text)
-        self.assertIn("Supported", text)
+        self.assertIn("Fully refuted", text)
+        self.assertIn("Fully supported", text)
         self.assertTrue(any(c.value == "Verification did not complete." for c in self.app.caption))
         self.assertEqual(sum(e.label == "Evidence passage" for e in self.app.expander), 3)
         self.assert_processing_finished()
