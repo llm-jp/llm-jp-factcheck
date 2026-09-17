@@ -137,6 +137,13 @@ h1, .app-header h1 {
 .results-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.55rem 1rem; border-bottom: 1px solid #e4ebf5; padding: 0.25rem 0 1rem; margin-bottom: 0.15rem; }
 .results-heading h3, h3.results-heading { color: #253d61; font-size: 1.05rem !important; font-weight: 680 !important; letter-spacing: -0.025em; margin: 0 !important; padding: 0 !important; }
 .results-count { display: inline-flex; align-items: center; background: #edf3fd; border: 1px solid #dfe9f9; border-radius: 7px; padding: 0.32rem 0.55rem; color: #4f6c99; font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
+.summary-totals { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; color: var(--muted); font-size: 0.73rem; margin: 0.2rem 0 0.85rem; }
+.summary-totals > span { white-space: nowrap; }
+.summary-totals strong { display: inline-block; min-width: 2ch; margin-left: 0.3rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.verdict-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin: 0; }
+.verdict-summary-card { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; min-height: 6rem; padding: 0.75rem 0.9rem; border: 1px solid; border-radius: 10px; }
+.verdict-summary-card dt { font-size: 0.74rem; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.verdict-summary-card dd { margin: 0.4rem 0 0; font-size: 1.5rem; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .eyebrow { color: #5b7395; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.055em; }
 .claim-heading { margin: 1.1rem 0 0.1rem; }
 .claim-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
@@ -144,19 +151,22 @@ h1, .app-header h1 {
 .claim-spinner, .progress-spinner { display: inline-block; width: 0.8rem; height: 0.8rem; flex-shrink: 0; border: 2px solid #dce5f2; border-top-color: #4f6c99; border-radius: 50%; animation: claim-spin 0.85s linear infinite; }
 .progress-message { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--muted); font-size: 0.8rem; line-height: 1.6; }
 .progress-spinner { margin-top: 0.24rem; }
+/* Keep result headings in place as progress changes to a completion message. */
+[data-testid="stVerticalBlock"][class*="st-key-factcheck_activity_"] { min-height: 4.5rem; }
+[data-testid="stVerticalBlock"][class*="st-key-factcheck_action_"] [data-testid="stButton"] button { min-width: 10.5rem; }
 @keyframes claim-spin { to { transform: rotate(360deg); } }
 .claim-text { font-size: 0.96rem; font-weight: 630; color: #243b5b; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0.35rem 0 0.65rem; }
 [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] .evidence-number) { border-color: #e1e8f2 !important; border-radius: 11px !important; background: #fff; }
 .evidence-number { color: #7a8aa1; font-size: 0.66rem; margin-bottom: 0.2rem; }
 .verdict { display: inline-block; padding: 0.32rem 0.62rem; border: 1px solid transparent; border-radius: 6px; font-size: 0.76rem; font-weight: 650; line-height: 1.45; }
-.verdict.supported { color: #12674e; background: #eaf6ef; border-color: #d8ecdf; }
-.verdict.partially-supported { color: #337668; background: #eff7f3; border-color: #e0ece5; }
-.verdict.inferentially-supported { color: #276884; background: #eef7fb; border-color: #dcecf3; }
-.verdict.inferentially-refuted { color: #906015; background: #fff7e8; border-color: #f4e8ce; }
-.verdict.refuted { color: #a04351; background: #fcf0f2; border-color: #f2dfe3; }
-.verdict.nei { color: #5e6d82; background: #eff3f8; border-color: #e3e9f1; }
+.verdict.supported, .verdict-summary-card.supported { color: #12674e; background: #eaf6ef; border-color: #d8ecdf; }
+.verdict.partially-supported, .verdict-summary-card.partially-supported { color: #337668; background: #eff7f3; border-color: #e0ece5; }
+.verdict.inferentially-supported, .verdict-summary-card.inferentially-supported { color: #276884; background: #eef7fb; border-color: #dcecf3; }
+.verdict.inferentially-refuted, .verdict-summary-card.inferentially-refuted { color: #906015; background: #fff7e8; border-color: #f4e8ce; }
+.verdict.refuted, .verdict-summary-card.refuted { color: #a04351; background: #fcf0f2; border-color: #f2dfe3; }
+.verdict.nei, .verdict-summary-card.nei { color: #5e6d82; background: #eff3f8; border-color: #e3e9f1; }
 .section-label { color: #728299; font-size: 0.71rem; font-weight: 650; margin: 0.4rem 0 0.4rem; }
-.rationale { font-size: 0.86rem; color: #3c4f69; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0.4rem; }
+.rationale, .evidence-source { font-size: 0.86rem; color: #3c4f69; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0.4rem; }
 .evidence-passage { background: #f4f7fc; border: 1px solid #e9eef6; border-left: 3px solid #c8d9f4; padding: 0.95rem 1rem; border-radius: 0 8px 8px 0; font-size: 0.83rem; color: #52647d; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0.4rem; }
 [data-testid="stExpander"] { border-color: #e2e9f2; border-radius: 9px; background: #fff; }
 [data-testid="stExpander"] summary p { font-size: 0.78rem; color: #657791; }
@@ -186,8 +196,11 @@ h1, .app-header h1 {
   .results-header { align-items: flex-start; padding-bottom: 0.8rem; }
   .results-heading h3, h3.results-heading { font-size: 0.97rem !important; }
   .results-count { font-size: 0.65rem; }
+  .verdict-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  .verdict-summary-card { min-height: 6.3rem; padding: 0.65rem; }
+  .verdict-summary-card dt { min-height: 3em; font-size: 0.7rem; }
   .claim-text { font-size: 0.89rem; }
-  .rationale { font-size: 0.82rem; }
+  .rationale, .evidence-source { font-size: 0.82rem; }
   .evidence-passage { padding: 0.8rem; font-size: 0.79rem; }
 }
 

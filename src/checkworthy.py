@@ -8,7 +8,7 @@ from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
 from utils import parse_json_response
 
-DEFAULT_PROMPT_PATH = PROMPT_DIR / "checkworthiness.json"
+DEFAULT_PROMPT_PATH = PROMPT_DIR / "checkworthiness.yaml"
 
 RESPONSE_FORMAT = {
     "type": "json_schema",

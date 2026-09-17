@@ -1,6 +1,6 @@
 # LLM-jp Factcheck
 
-A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict. Users can inspect the evidence passages, their sources, and the associated training steps as results arrive.
+A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict. Users can inspect the evidence passages and their sources as results arrive.
 
 ## Setup
 
@@ -119,7 +119,11 @@ Each reply displays the Chatbot model or Azure deployment name used to generate 
 
 Results remain associated with their response as the conversation continues. Claims, evidence, and verdicts are kept outside the chat history sent to the LLM. **New chat** clears the conversation and its verification results.
 
-The first fact-check starts immediately. Checking the same response again opens a confirmation modal: **Run again** replaces its existing results, while **Cancel**, the close button, or Escape keeps them. The progress indicator disappears when the run ends. Expand **Evidence passage** to read the passage together with its source name and training step.
+Failures display a short retry message. Technical exception details and tracebacks are recorded in the server logs and are not shown in the interface. Partial fact-check results remain available after a failure.
+
+The first fact-check starts immediately. Checking the same response again opens a confirmation modal: **Run again** replaces its existing results, while **Cancel**, the close button, or Escape keeps them. The progress indicator disappears when the run ends. The **Source** section below the rationale shows the source name. Expand **Evidence passage** to read the passage itself. Training steps are not displayed.
+
+The top of **Fact-check results** summarizes the six verdict counts as results arrive. Counts represent completed claim–evidence pairs, so one claim with multiple passages can contribute several verdicts. Skipped claims and claims without retrieved evidence are counted separately; pending or failed verifications are not counted as verdicts. The summary retains all six labels, including zero counts, while processing continues.
 
 During a fact-check, its button changes to **Pause fact-check**. Pausing stops new requests from starting while retaining the current pipeline, progress, and intermediate results. Requests already sent may finish and their responses are retained for resumption. Select **Resume fact-check** to continue without repeating completed requests. The progress bar stays visible while paused; activity icons stop. **New chat** discards paused or running checks and cancels work that has not started.
 
@@ -129,34 +133,37 @@ After decomposition, the Factchecker model assesses each claim independently in 
 
 ## Replace prompts
 
-Prompts are UTF-8 JSON files containing `system` and `user` strings. Edit these strings to replace instructions, guidelines, or few-shot examples.
+Prompts are UTF-8 YAML files containing `system` and `user` strings. Literal blocks (`|` or `|-`) keep instructions, guidelines, and few-shot examples readable with their original line breaks. Edit the indented text to replace them. Existing custom JSON prompt files are also accepted.
 
 | Task | Default file | Required placeholders | Optional placeholders |
 | --- | --- | --- | --- |
-| Decomposition | `prompts/decomposition_8shot.json` | `{{document}}` | `{{context}}` |
-| Check-worthiness | `prompts/checkworthiness.json` | `{{claim}}` | None |
-| Verification | `prompts/verification.json` | `{{claim}}`, `{{evidence}}` | None |
+| Decomposition | `prompts/decomposition_8shot.yaml` | `{{document}}` | `{{context}}` |
+| Check-worthiness | `prompts/checkworthiness.yaml` | `{{claim}}` | None |
+| Verification | `prompts/verification.yaml` | `{{claim}}`, `{{evidence}}` | None |
 
 The check-worthiness template receives one claim in `{{claim}}`. Edit its `system` and `user` strings to change selection criteria or examples; files are reread on every call. Existing custom check-worthiness templates must replace `{{claims}}` with `{{claim}}` and request a single boolean `label`. The bundled criteria follow `v3.0`, with its subjective-opinion example corrected to `false` to match the stated criteria.
 
 For example, a minimal decomposition prompt is:
 
-```json
-{
-  "system": "Decompose the response into minimal claims that can each be understood independently.",
-  "user": "Context:\n{{context}}\nResponse:\n{{document}}"
-}
+```yaml
+system: |-
+  Decompose the response into minimal claims that can each be understood independently.
+user: |-
+  Context:
+  {{context}}
+  Response:
+  {{document}}
 ```
 
-Ordinary JSON braces do not need escaping. Supported `{{...}}` placeholders are expanded once; placeholder-like text inside inputs is preserved. Files are reread on each call, so edits take effect on subsequent calls. Select alternate files without changing Python code:
+Keep block contents indented with spaces. `|-` removes the final newline; `|` preserves one final newline. JSON examples inside the blocks do not need escaping. Supported `{{...}}` placeholders are expanded once; placeholder-like text inside inputs is preserved. Files are reread on each call, so edits take effect on subsequent calls. Select alternate files without changing Python code:
 
 ```bash
 uv run --locked streamlit run src/serve.py -- \
   --engine your-factcheck-model-or-deployment \
   --chat-engine your-chat-model-or-deployment \
-  --decomposition-prompt /path/to/decomposition.json \
-  --checkworthiness-prompt /path/to/checkworthiness.json \
-  --verification-prompt /path/to/verification.json
+  --decomposition-prompt /path/to/decomposition.yaml \
+  --checkworthiness-prompt /path/to/checkworthiness.yaml \
+  --verification-prompt /path/to/verification.yaml
 ```
 
 Python callers can set `prompt_path` on each function. Run scripts with `PYTHONPATH=src uv run --locked python your_script.py`:
@@ -169,13 +176,13 @@ from verify import verify_claim
 claims = decompose_document_into_claims(
     "London is the capital of England.",
     model="your-factcheck-model-or-deployment",
-    prompt_path="prompts/decomposition_8shot.json",
+    prompt_path="prompts/decomposition_8shot.yaml",
 )
 for claim in claims:
     is_checkworthy = identify_checkworthiness(
         claim,
         model="your-factcheck-model-or-deployment",
-        prompt_path="prompts/checkworthiness.json",
+        prompt_path="prompts/checkworthiness.yaml",
     )
     if not is_checkworthy:
         continue
@@ -183,12 +190,12 @@ for claim in claims:
         claim,
         "London is the capital of England.",
         model="your-factcheck-model-or-deployment",
-        prompt_path="prompts/verification.json",
+        prompt_path="prompts/verification.yaml",
     )
-    # The result contains an English "label".
+    # The result contains an English "label" and a brief "rationale".
 ```
 
-JSON Schemas in Python define the output contract: decomposition returns a list of claim strings and check-worthiness reads a single boolean `label`. Base verification requests only one Japanese `label` from the model and maps it to an English label for the application. No rationale, chain-of-thought instruction, or few-shot demonstration is requested. Application validation rejects extra fields and invalid labels. The UI displays a rationale only when a result provides one, such as the static mock fixtures. Prompt files control instructions independently of the schemas and remain editable.
+JSON Schemas in Python define the output contract: decomposition returns a list of claim strings and check-worthiness reads a single boolean `label`. Verification requests a Japanese `label` and a brief English `rationale`, then maps the label to English for the application. The rationale should justify the verdict in one sentence of at most 40 words, identifying relevant evidence or missing information and any inference needed for an inferential label. This length is a prompt instruction; validation requires a nonempty string and does not truncate explanations. No few-shot demonstrations are included. Application validation rejects missing or extra fields, invalid labels, and empty rationales. The UI displays the rationale with the verdict and remains compatible with older results without one. Prompt files control instructions independently of the schemas and remain editable.
 
 Verification returns one of these six English labels:
 
@@ -201,9 +208,9 @@ Verification returns one of these six English labels:
 
 The model's JSON label must be one of `完全支持`, `推定支持`, `部分支持`, `完全否定`, `推定否定`, or `不明`, respectively. There is no partially-refuted category: an explicit contradiction about part of a claim is classified as fully refuted. Inferential support and refutation use the paper's definitions of implicit inference and background knowledge.
 
-The default decomposition prompt uses **guideline + 8-shot**, based on the rule/example/explanation guidelines and eight development examples from the paper's `experiment/lrec2026` branch. The 13 guideline sections and their instructional examples are retained in Japanese to preserve the source wording. Demonstration outputs use the application's JSON Schema contract. Conversation context is used only to resolve references; check-worthiness remains a separate step. The source revision, example IDs, and file paths are recorded in [evaluations/decomposition_8shot_source.json](evaluations/decomposition_8shot_source.json). Edit `prompts/decomposition_8shot.json` to change the default instructions. The zero-shot variant remains available in `prompts/decomposition.json`.
+The default decomposition prompt uses **guideline + 8-shot**, based on the rule/example/explanation guidelines and eight development examples from the paper's `experiment/lrec2026` branch. The 13 guideline sections and their instructional examples are retained in Japanese to preserve the source wording. Demonstration outputs use the application's JSON Schema contract. Conversation context is used only to resolve references; check-worthiness remains a separate step. The source revision, example IDs, and file paths are recorded in [evaluations/decomposition_8shot_source.json](evaluations/decomposition_8shot_source.json). Edit `prompts/decomposition_8shot.yaml` to change the default instructions. The zero-shot variant remains available in `prompts/decomposition.yaml`.
 
-Verification uses the **base** prompt from `feat/verdict_prediction`, following [Masano et al. (ACL SRW 2026)](https://aclanthology.org/2026.acl-srw.99/). Its Japanese task and label definitions are retained; the original plain-label output is adapted to Structured Outputs. The source revision and paths are recorded in [evaluations/verification_source.json](evaluations/verification_source.json). Edit `prompts/verification.json` to change these instructions.
+Verification uses the **base prompt with a short rationale added**, derived from `feat/verdict_prediction` and [Masano et al. (ACL SRW 2026)](https://aclanthology.org/2026.acl-srw.99/). Its Japanese task and label definitions are retained; the output uses Structured Outputs with `label` followed by `rationale`. The source revision and paths are recorded in [evaluations/verification_source.json](evaluations/verification_source.json). Edit `prompts/verification.yaml` to change these instructions.
 
 ## Evaluate claim decomposition
 
@@ -227,13 +234,13 @@ To evaluate **guideline + 0-shot** instead, select both its prompt and source ma
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
-  --prompt prompts/decomposition.json \
+  --prompt prompts/decomposition.yaml \
   --source-manifest evaluations/decomposition_source.json \
   --model gpt-5.4-2026-03-05 \
   --output result/decomposition-guideline-zero-shot
 ```
 
-The eight demonstrations come from the pinned branch's `scripts/prompts/decomposition/fewshot/8shot.txt`. Its `manual_rule+example+expl_8shot.txt` actually contains only six demonstrations; those six are identical to the first six in the complete few-shot file. The eight-shot prompt combines the existing zero-shot guideline with all eight examples and adapts their output wrappers to `{"claims": [...]}`. All eight inputs were verified against the development set and have no overlap with the test set. Their document IDs and source paths are recorded in the source manifest. The app and evaluation runner use eight-shot by default. To select zero-shot in the app, pass `--decomposition-prompt prompts/decomposition.json` when starting Streamlit.
+The eight demonstrations come from the pinned branch's `scripts/prompts/decomposition/fewshot/8shot.txt`. Its `manual_rule+example+expl_8shot.txt` actually contains only six demonstrations; those six are identical to the first six in the complete few-shot file. The eight-shot prompt combines the existing zero-shot guideline with all eight examples and adapts their output wrappers to `{"claims": [...]}`. All eight inputs were verified against the development set and have no overlap with the test set. Their document IDs and source paths are recorded in the source manifest. The app and evaluation runner use eight-shot by default. To select zero-shot in the app, pass `--decomposition-prompt prompts/decomposition.yaml` when starting Streamlit.
 
 This command sends live requests through the Factchecker endpoint configured in `.env`. Model precedence is `--model`, then `FACTCHECKER_MODEL`, then `gpt-5.4-2026-03-05`. `--prompt` changes the editable prompt file; `--runs` defaults to `5` and `--max-concurrency` to `8`. `--request-timeout` sets the API request timeout in seconds (default: `120`, with the SDK's standard retries). `--limit N` runs a clearly marked smoke-test subset. Each completed prediction is saved; rerunning the same command resumes missing predictions. A changed model, prompt, dataset, generation implementation, or dependency version requires a different output directory. Incomplete runs fail instead of silently dropping missing documents.
 
@@ -243,15 +250,17 @@ Matching uses the reference Hungarian implementation, including its tie resoluti
 
 These results evaluate the application's configured model and Structured Outputs. The paper used GPT-4o, while this application defaults to GPT-5.4 and provider-default sampling. The prompt's output wrapper and handling of application context also differ from the original experimental runner. Treat these as an evaluation using the paper's guidelines and metrics, not an exact replication of its published model scores. Exact matching preserves the dataset's original whitespace and punctuation; the application's returned predictions have outer whitespace stripped as in normal use.
 
-## Evaluate base verification
+## Evaluate verification
 
-The completed GPT-5.4 base evaluation achieved accuracy **0.6279**, macro precision **0.3990**, macro recall **0.4857**, and macro F1 **0.4000**, averaged over three runs. See the [evaluation report](evaluations/verification_base.md) for per-label results, API failures, and comparison conditions, and [machine-readable scores](evaluations/verification_base.json) for the full metrics.
+The earlier GPT-5.4 evaluation without rationales achieved accuracy **0.6279**, macro precision **0.3990**, macro recall **0.4857**, and macro F1 **0.4000**, averaged over three runs. Its [evaluation report](evaluations/verification_base.md) and [machine-readable scores](evaluations/verification_base.json) are retained as the baseline. The command below evaluates the current prompt with short rationales; only verdict labels are scored, and the explanations are saved alongside them.
+
+With short rationales, the three-run means are accuracy **0.6256**, macro precision **0.4019**, macro recall **0.4968**, and macro F1 **0.4028**. Compared with the baseline, macro F1 increases by **0.0028** and accuracy decreases by **0.0023**. All successful rationales were within the requested 40-word limit. See the [rationale evaluation report](evaluations/verification_rationale.md) and [machine-readable comparison](evaluations/verification_rationale.json) for per-label changes, run variation, and failures. These are descriptive differences, not a claim of statistical significance.
 
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_verification.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
   --model gpt-5.4-2026-03-05 \
-  --output result/verification-base
+  --output result/verification-rationale
 ```
 
 The protocol follows the paper's three-run AIO test evaluation. From 6,824 test pairs, 1,142 pairs whose evidence is the original LLM input question are excluded, leaving 5,682 pairs. Exclusion compares evidence with the corresponding question after trimming outer whitespace. Gold labels use the six paper categories; `完全矛盾` and `推定矛盾` are normalized to the matching refutation categories. There is no new decomposition, claim selection, or retrieval during this evaluation.
@@ -263,6 +272,8 @@ The model and Factchecker connection are configured as for decomposition evaluat
 The pinned branch also contains three saved GPT-4o base runs. Their scores are recomputed separately using their recorded gold labels. Those files contain 5,681 pairs: ID 7006 is absent, and three evidence passages differ from the current test data. These discrepancies are recorded in `reference_scores.json`; the current evaluation retains the extra valid pair and uses the pinned test file's evidence. The paper's GPT-4o results and the current model's results therefore have documented model, output-format, and small data differences.
 
 Snapshots, hashes, predictions, per-run scores, reference scores, and a summary are saved under the selected output directory. The main metric implementation is checked against scikit-learn, as used by the reference evaluator. No Elasticsearch instance is needed.
+
+Both evaluation runners save prompt snapshots as `prompt.yaml`. The YAML migration preserves the rendered prompt text exactly, but changes file hashes. Existing evaluation artifacts and their hashes are kept as recorded; use a new output directory for evaluations with the YAML files.
 
 ## Development
 

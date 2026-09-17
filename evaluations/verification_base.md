@@ -55,7 +55,7 @@ The original test file contains 6,824 pairs. In line with the paper’s exclusio
 
 The aggregate metrics, each class’s precision/recall/F1/support, and confusion matrices agree with scikit-learn’s reference metric functions for every run (absolute tolerance 1e-12). Re-scoring saved predictions without API requests reproduced all scores. Unit tests cover label normalization, fixed-label macro averaging, error accounting, exact dataset coverage, input-evidence exclusion, checkpoint recovery, Japanese-to-English output mapping, and rendering results without a rationale.
 
-The application now uses the same six-label base prompt by default. The UI keeps English labels and does not display an empty rationale section. Mock fixtures cover all six categories. The prompt remains editable in [prompts/verification.json](../prompts/verification.json).
+This evaluation used the six-label base prompt without rationales. The application has since added short rationales to [prompts/verification.yaml](../prompts/verification.yaml). The original prompt snapshot and protocol remain under `result/verification-base/`; these scores describe that earlier configuration.
 
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_verification.py \
@@ -65,6 +65,6 @@ uv run --locked --group evaluation python scripts/evaluate_verification.py \
   --output result/verification-base
 ```
 
-Append `--score-only` to compute metrics from completed saved predictions without model requests. The protocol, aggregate and per-label metrics, reference scores, and error records are in [verification_base.json](verification_base.json). Raw predictions, input snapshots, excluded IDs, per-run confusion matrices, and error diagnostics are under `result/verification-base/` (ignored by Git).
+This is the historical command, using the label-only implementation at application commit `9a7f4589c81970d946c88700cadf211324c24d37`. The current implementation uses a different prompt and output schema, so reproducing or re-scoring this baseline requires that earlier implementation. With it, append `--score-only` to compute metrics from completed saved predictions without model requests. The protocol, aggregate and per-label metrics, reference scores, and error records are in [verification_base.json](verification_base.json). Raw predictions, input snapshots, excluded IDs, per-run confusion matrices, and error diagnostics are under `result/verification-base/` (ignored by Git).
 
 Validation: 141 of 142 tests passed. The pre-existing chat-history test expects a system message that the current chat implementation no longer sends. Ruff lint/format, lockfile validation, and the relevant verification/UI/evaluation tests passed.

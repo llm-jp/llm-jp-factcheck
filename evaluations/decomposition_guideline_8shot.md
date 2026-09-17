@@ -14,7 +14,7 @@ Completed on 2026-09-16T12:15:25.261577+00:00.
 
 ## Eight-shot prompt
 
-This is **guideline + 8-shot**, using the existing zero-shot guideline and eight additional input/output demonstrations. The app now defaults to the eight-shot prompt in [prompts/decomposition_8shot.json](../prompts/decomposition_8shot.json).
+This is **guideline + 8-shot**, using the existing zero-shot guideline and eight additional input/output demonstrations. The app now defaults to the eight-shot prompt in [prompts/decomposition_8shot.yaml](../prompts/decomposition_8shot.yaml).
 
 The reference file named `manual_rule+example+expl_8shot.txt` contains only six demonstrations. The complete `scripts/prompts/decomposition/fewshot/8shot.txt` contains eight, and its first six match those in the guideline file. All eight are imported from that complete file, preserving their text and claim strings while adapting output arrays to the application’s `{"claims": [...]}` schema. The guideline rules, application instructions, and user template are unchanged from the zero-shot evaluation.
 
@@ -57,7 +57,7 @@ All 2,100 document/metric combinations were compared against the original refere
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
-  --prompt prompts/decomposition_8shot.json \
+  --prompt prompts/decomposition_8shot.yaml \
   --source-manifest evaluations/decomposition_8shot_source.json \
   --model gpt-5.4-2026-03-05 \
   --output result/decomposition-guideline-8shot

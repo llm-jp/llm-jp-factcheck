@@ -52,7 +52,7 @@ All 2,100 document/metric combinations (210 documents × five runs × two metric
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
-  --prompt prompts/decomposition.json \
+  --prompt prompts/decomposition.yaml \
   --source-manifest evaluations/decomposition_source.json \
   --output result/decomposition-guideline-zero-shot
 ```

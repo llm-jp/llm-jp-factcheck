@@ -10,9 +10,9 @@ class PipelineTests(unittest.TestCase):
     def setUp(self):
         self.config = PipelineConfig(
             num_evidences=2,
-            decomposition_prompt="custom-decomposition.json",
-            checkworthiness_prompt="custom-checkworthiness.json",
-            verification_prompt="custom-verification.json",
+            decomposition_prompt="custom-decomposition.yaml",
+            checkworthiness_prompt="custom-checkworthiness.yaml",
+            verification_prompt="custom-verification.yaml",
         )
         self.decompose = self.patch("decompose_document_into_claims", return_value=["クレーム A", "クレーム B"])
         self.checkworthy = self.patch("identify_checkworthiness", return_value=True)

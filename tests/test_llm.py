@@ -63,7 +63,7 @@ class LLMTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     decompose.decompose_document_into_claims("Text", "deployment")
 
-    def test_accepts_six_japanese_labels_and_returns_english_without_rationale(self):
+    def test_accepts_six_japanese_labels_and_preserves_short_rationales(self):
         labels = (
             "Fully supported",
             "Inferentially supported",
@@ -77,8 +77,13 @@ class LLMTests(unittest.TestCase):
         for raw_label, label in verify.MODEL_LABELS.items():
             with self.subTest(label=label):
                 getter.reset_mock()
-                mocked.chat.completions.create.return_value = response({"label": raw_label})
-                self.assertEqual(verify.verify_claim("Claim A", "Evidence B", "deployment"), {"label": label})
+                mocked.chat.completions.create.return_value = response(
+                    {"label": raw_label, "rationale": " Evidence supports the verdict. "}
+                )
+                self.assertEqual(
+                    verify.verify_claim("Claim A", "Evidence B", "deployment"),
+                    {"label": label, "rationale": "Evidence supports the verdict."},
+                )
                 getter.assert_called_once_with("factchecker")
                 kwargs = mocked.chat.completions.create.call_args.kwargs
                 self.assertEqual(kwargs["model"], "deployment")
@@ -86,7 +91,7 @@ class LLMTests(unittest.TestCase):
                 self.assertIn("Evidence B", kwargs["messages"][1]["content"])
                 schema = kwargs["response_format"]["json_schema"]["schema"]
                 self.assertEqual(schema["properties"]["label"]["enum"], list(verify.MODEL_LABELS))
-                self.assertEqual(set(schema["properties"]), {"label"})
+                self.assertEqual(set(schema["properties"]), {"label", "rationale"})
 
     def test_empty_evidence_is_nei_without_api_call(self):
         _, getter = self.mock_client(verify, None)
@@ -113,7 +118,13 @@ class LLMTests(unittest.TestCase):
             {"label": "supported"},
             {"label": "Fully supported"},
             {"label": "完全矛盾"},
-            {"label": "完全支持", "rationale": "Unrequested reasoning"},
+            {"label": "完全支持"},
+            {"label": "完全支持", "rationale": ""},
+            {"label": "完全支持", "rationale": " \n"},
+            {"label": "完全支持", "rationale": None},
+            {"label": "完全支持", "rationale": 1},
+            {"label": "Fully supported", "rationale": "Invalid raw label."},
+            {"label": "完全支持", "rationale": "Reason", "extra": True},
             {"label": "完全支持", "extra": True},
         ]
         for payload in payloads:
@@ -212,7 +223,7 @@ class LLMTests(unittest.TestCase):
             (checkworthy, {"label": True}, lambda: checkworthy.identify_checkworthiness("Claim", "deployment")),
             (
                 verify,
-                {"label": "完全支持"},
+                {"label": "完全支持", "rationale": "The evidence supports the claim."},
                 lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
             ),
         ]
@@ -248,7 +259,7 @@ class LLMTests(unittest.TestCase):
             (
                 verify,
                 "verification",
-                {"label": "完全支持"},
+                {"label": "完全支持", "rationale": "The evidence supports the claim."},
                 lambda: verify.verify_claim("Claim", "Evidence", "deployment"),
             ),
         ]
@@ -269,7 +280,9 @@ class LLMTests(unittest.TestCase):
                 self.assertEqual(set(definition["schema"]["properties"]), set(payload))
 
     def test_custom_prompts_reload_between_invocations(self):
-        mocked, _ = self.mock_client(verify, response({"label": "完全支持"}))
+        mocked, _ = self.mock_client(
+            verify, response({"label": "完全支持", "rationale": "The evidence supports the claim."})
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "custom.json"
             for instruction in ["First instructions", "Replaced instructions"]:

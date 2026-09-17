@@ -1,11 +1,12 @@
-"""Load editable UTF-8 JSON prompts without caching their contents."""
+"""Load editable UTF-8 YAML prompts without caching their contents."""
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Mapping
+
+import yaml
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _PLACEHOLDER = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
@@ -18,15 +19,16 @@ def render_prompt(
 ) -> list[dict[str, str]]:
     """Read a prompt, validate its placeholders, and return chat messages.
 
-    JSON contains exactly ``system`` and ``user`` strings. Placeholders use
+    YAML contains exactly ``system`` and ``user`` strings. Legacy JSON prompt
+    files are also accepted. Placeholders use
     double braces (for example ``{{document}}``); ordinary JSON example braces
     are left alone. Substitution is a single pass, including for input that
     itself contains a placeholder-looking string.
     """
     path = Path(path)
     try:
-        template = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        template = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise ValueError(f"Cannot load prompt {path}: {exc}") from exc
     if not isinstance(template, dict) or set(template) != {"system", "user"}:
         raise ValueError(f"Prompt {path} must contain exactly 'system' and 'user'.")

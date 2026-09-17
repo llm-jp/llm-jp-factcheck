@@ -66,7 +66,7 @@ class EvaluationDataTests(unittest.TestCase):
                         evaluation.main()
                 client.assert_not_called()
 
-                prompt = output / "prompt.json"
+                prompt = output / "prompt.yaml"
                 prompt.write_text("{}")
                 with self.assertRaisesRegex(ValueError, "snapshot differs"):
                     evaluation.main()

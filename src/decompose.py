@@ -6,7 +6,7 @@ from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
 from utils import parse_json_response
 
-DEFAULT_PROMPT_PATH = PROMPT_DIR / "decomposition_8shot.json"
+DEFAULT_PROMPT_PATH = PROMPT_DIR / "decomposition_8shot.yaml"
 
 RESPONSE_FORMAT = {
     "type": "json_schema",

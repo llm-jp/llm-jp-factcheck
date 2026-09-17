@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from prompts import PROMPT_DIR, render_prompt
@@ -13,17 +15,31 @@ class PromptTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.path = Path(self.directory.name) / "prompt.json"
+        self.path = Path(self.directory.name) / "prompt.yaml"
 
     def write(self, template):
-        self.path.write_text(json.dumps(template, ensure_ascii=False), encoding="utf-8")
+        self.path.write_text(yaml.safe_dump(template, allow_unicode=True), encoding="utf-8")
+
+    def test_literal_blocks_preserve_line_breaks_and_json_examples(self):
+        self.path.write_text(
+            'system: |\n  Instructions:\n\n  {"claims": ["日本語"]}\nuser: |-\n  Text:\n  {{document}}\n',
+            encoding="utf-8",
+        )
+        messages = render_prompt(self.path, {"document": "First\nSecond"}, {"document"})
+        self.assertEqual(messages[0]["content"], 'Instructions:\n\n{"claims": ["日本語"]}\n')
+        self.assertEqual(messages[1]["content"], "Text:\nFirst\nSecond")
+
+    def test_legacy_json_prompts_are_supported(self):
+        path = self.path.with_suffix(".json")
+        path.write_text(json.dumps({"system": "Instructions", "user": "{{document}}"}), encoding="utf-8")
+        self.assertEqual(render_prompt(path, {"document": "Text"}, {"document"})[1]["content"], "Text")
 
     def test_default_templates_have_required_inputs(self):
         cases = [
-            ("decomposition.json", {"document": "本文", "context": "背景"}, {"document"}),
-            ("decomposition_8shot.json", {"document": "本文", "context": "背景"}, {"document"}),
-            ("checkworthiness.json", {"claim": "Claim A"}, {"claim"}),
-            ("verification.json", {"claim": "主張", "evidence": "証拠"}, {"claim", "evidence"}),
+            ("decomposition.yaml", {"document": "本文", "context": "背景"}, {"document"}),
+            ("decomposition_8shot.yaml", {"document": "本文", "context": "背景"}, {"document"}),
+            ("checkworthiness.yaml", {"claim": "Claim A"}, {"claim"}),
+            ("verification.yaml", {"claim": "主張", "evidence": "証拠"}, {"claim", "evidence"}),
         ]
         for name, values, required in cases:
             with self.subTest(name=name):

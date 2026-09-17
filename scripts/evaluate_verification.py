@@ -1,4 +1,4 @@
-"""Evaluate the base verdict prompt on AIO with three independent runs."""
+"""Evaluate verdict prediction with short rationales on AIO over three runs."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def main():
     load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-repo", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=ROOT / "result/verification-base")
+    parser.add_argument("--output", type=Path, default=ROOT / "result/verification-rationale")
     parser.add_argument("--model", default=os.getenv("FACTCHECKER_MODEL", "").strip() or "gpt-5.4-2026-03-05")
     parser.add_argument("--prompt", type=Path, default=DEFAULT_PROMPT_PATH)
     parser.add_argument("--runs", type=int, default=3)
@@ -121,7 +121,7 @@ def main():
         },
         "versions": {"openai": importlib.metadata.version("openai")},
         "sampling": "provider defaults; no temperature, top_p, seed, or reasoning-effort override",
-        "output": "one Japanese label only, mapped to the corresponding English label; no rationale requested",
+        "output": "Japanese label mapped to English, followed by a short English rationale (one sentence, at most 40 words)",
         "aggregation": "pair accuracy; macro P/R/F1 over the fixed six labels; mean and population SD over runs",
         "errors": "explicit failed predictions count as incorrect; no missing pair is silently excluded",
     }
@@ -135,10 +135,10 @@ def main():
         write_json(protocol_path, protocol)
         write_json(output / "gold.json", gold)
         write_json(output / "excluded_input_ids.json", excluded)
-        (output / "prompt.json").write_bytes(prompt_bytes)
+        (output / "prompt.yaml").write_bytes(prompt_bytes)
     if not (output / "reference_scores.json").exists():
         write_json(output / "reference_scores.json", reference_scores(args.dataset_repo, source, full_gold))
-    if digest((output / "prompt.json").read_bytes()) != protocol["prompt_sha256"]:
+    if digest((output / "prompt.yaml").read_bytes()) != protocol["prompt_sha256"]:
         raise ValueError("Saved prompt snapshot changed.")
     if json.loads((output / "gold.json").read_text()) != gold:
         raise ValueError("Saved gold snapshot changed.")
@@ -163,7 +163,7 @@ def main():
             with ThreadPoolExecutor(max_workers=args.max_concurrency) as executor:
                 futures = {
                     executor.submit(
-                        verify_claim, row["claim"], row["evidence"], args.model, prompt_path=output / "prompt.json"
+                        verify_claim, row["claim"], row["evidence"], args.model, prompt_path=output / "prompt.yaml"
                     ): row["ID"]
                     for row in pending
                 }
@@ -179,6 +179,7 @@ def main():
                                 "error": {
                                     "type": type(exc).__name__,
                                     "status_code": getattr(exc, "status_code", None),
+                                    "code": getattr(exc, "code", None),
                                 },
                             }
                         by_id[identifier] = result

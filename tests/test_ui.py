@@ -158,6 +158,7 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(len(self.app.get("progress")), 0)
         self.assertEqual(len(self.app.get("status")), 0)
         self.assertNotIn('class="claim-spinner"', self.rendered_text())
+        self.assertFalse(any("Fact-check complete" in caption.value for caption in self.app.caption))
 
     def test_initial_page_is_english_and_loads_no_models(self):
         self.pipeline.PipelineConfig.assert_not_called()
@@ -192,14 +193,15 @@ class ChatUITest(unittest.TestCase):
         self.check(first["id"], claim_result())
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
-        self.assertTrue(any("Fact-check complete" in caption.value for caption in self.app.caption))
+        self.assertFalse(any("Fact-check complete" in caption.value for caption in self.app.caption))
         checked_message = [message for message in self.app.chat_message if message.name == "assistant"][0]
         passages = [expander for expander in checked_message.expander if expander.label == "Evidence passage"]
         self.assertEqual(len(passages), 1)
         self.assertFalse(passages[0].proto.expanded)
         self.assertIn("&lt;script&gt;unsafe&lt;/script&gt;", "\n".join(block.value for block in passages[0].markdown))
         self.assertFalse(any(expander.label == "Source details" for expander in checked_message.expander))
-        self.assertEqual([text.value for text in passages[0].text], ["Source: test dataset", "Training step: 123"])
+        self.assertEqual(len(passages[0].text), 0)
+        self.assertIn('class="evidence-source">test dataset</p>', self.rendered_text())
         self.assertTrue(any("Fact-check results" in block.value for block in checked_message.markdown))
 
         self.send("Tell me more.", "Tokyo was formerly called Edo.")
@@ -403,6 +405,14 @@ class ChatUITest(unittest.TestCase):
         run = self.check(message["id"], claim_result(labels=LABELS))
         self.assertEqual(len(run["results"][0]["evidences"]), len(LABELS))
         content = self.rendered_text()
+        summary = next(block.value for block in self.app.markdown if 'aria-label="Verdict summary"' in block.value)
+        self.assertIn("Evidence verdicts <strong>6</strong>", summary)
+        for label in LABELS:
+            self.assertIn(f"<dt>{label}</dt><dd>1</dd>", summary)
+        blocks = [block.value for block in self.app.markdown]
+        self.assertLess(
+            blocks.index(summary), next(i for i, block in enumerate(blocks) if 'class="claim-heading"' in block)
+        )
         for label in LABELS:
             self.assertIn(f">{label}</span>", content)
         self.assertIn("&lt;script&gt;unsafe&lt;/script&gt;", content)
@@ -412,13 +422,20 @@ class ChatUITest(unittest.TestCase):
         visible = content + "\n" + "\n".join(text.value for text in self.app.text)
         visible += "\n" + "\n".join(caption.value for caption in self.app.caption)
         self.assertNotIn("Relevance score", visible)
+        self.assertNotIn("Training step", visible)
+        self.assertEqual(content.count('class="evidence-source">test dataset</p>'), len(LABELS))
+        self.assertLess(
+            content.index('<div class="section-label">Rationale</div>'),
+            content.index('<div class="section-label">Source</div>'),
+        )
         evidence = run["results"][0]["evidences"][0]
         self.assertEqual(evidence["training_step"], 123)
         self.assertNotIn("meta", evidence)
         passages = [expander for expander in self.app.expander if expander.label == "Evidence passage"]
         self.assertEqual(len(passages), len(LABELS))
         for passage in passages:
-            self.assertEqual([text.value for text in passage.text], ["Source: test dataset", "Training step: 123"])
+            self.assertEqual(len(passage.text), 0)
+            self.assertNotIn('class="evidence-source"', "\n".join(block.value for block in passage.markdown))
         self.assertTrue(all(not passage.proto.expanded for passage in passages))
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
@@ -438,14 +455,18 @@ class ChatUITest(unittest.TestCase):
             raise RuntimeError("Chat connection failed")
 
         self.chat.stream_chat_response.side_effect = broken_stream
-        self.app.chat_input[0].set_value("Tell me about Japan.").run()
-        self.assert_app_ok()
+        with self.assertLogs(level="ERROR") as logs:
+            self.app.chat_input[0].set_value("Tell me about Japan.").run()
+            self.assert_app_ok()
+        self.assertIn("Chat connection failed", "\n".join(logs.output))
         messages = deepcopy(self.app.session_state["messages"])
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(self.assistants(), [])
-        self.assertIn("Chat connection failed", self.app.session_state["chat_error"])
-        self.assertTrue(any("Chat connection failed" in error.value for error in self.app.error))
+        self.assertNotIn("Chat connection failed", self.app.session_state["chat_error"])
+        self.assertEqual(
+            [error.value for error in self.app.error], ["Unable to generate a response. Please select Retry response."]
+        )
         self.pipeline.run_factcheck.assert_not_called()
         self.chat.stream_chat_response.side_effect = None
         self.chat.stream_chat_response.return_value = iter(["Tokyo is Japan's capital."])
@@ -470,14 +491,19 @@ class ChatUITest(unittest.TestCase):
         message = self.assistants()[0]
         saved_messages = deepcopy(self.app.session_state["messages"])
         self.pipeline.run_factcheck.side_effect = failing_events
-        run = self.check(message["id"])
+        with self.assertLogs(level="ERROR") as logs:
+            run = self.check(message["id"])
+        self.assertIn("Verification connection failed", "\n".join(logs.output))
         self.assertEqual(run["state"], "error")
         self.assertEqual(len(run["results"]), 1)
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
         self.assertEqual(run["results"][0]["evidences"][0]["verification"]["label"], "Fully supported")
-        self.assertIn("Verification connection failed", run["error"])
-        self.assertTrue(any("Verification connection failed" in error.value for error in self.app.error))
+        self.assertNotIn("Verification connection failed", run["error"])
+        self.assertEqual(
+            [error.value for error in self.app.error],
+            ["Unable to complete the fact-check. Please try again. Available results are shown below."],
+        )
         self.assertEqual(self.app.session_state["messages"], saved_messages)
         self.app.run()
         self.assert_app_ok()
@@ -524,22 +550,58 @@ class ChatUITest(unittest.TestCase):
         self.assert_processing_finished()
         self.pipeline.run_factcheck.assert_called_once()
 
+    def test_start_failure_is_logged_and_legacy_errors_are_not_displayed(self):
+        detail = "ProtocolError('Connection aborted', ConnectionResetError(54, 'Connection reset by peer'))"
+        self.send("Tell me about Japan.")
+        response_id = self.assistants()[0]["id"]
+        self.pipeline.PipelineConfig.side_effect = ConnectionError(detail)
+        with self.assertLogs(level="ERROR") as logs:
+            run = self.check(response_id)
+        self.assertIn(detail, "\n".join(logs.output))
+        self.assertEqual(run["state"], "error")
+        self.assertEqual(
+            [error.value for error in self.app.error],
+            ["Unable to complete the fact-check. Please try again."],
+        )
+        self.assertNotIn(detail, run["error"])
+        self.assert_processing_finished()
+
+        # Sessions created before this change can still hold raw exception text.
+        run["error"] = detail
+        self.app.session_state["chat_error"] = detail
+        self.app.run()
+        self.assert_app_ok()
+        self.assertEqual(len(self.app.error), 2)
+        for error in self.app.error:
+            self.assertNotIn("ProtocolError", error.value)
+            self.assertNotIn("ConnectionResetError", error.value)
+            self.assertIn("Unable to", error.value)
+
     def test_claim_list_is_visible_immediately_after_decomposition(self):
+        release = Event()
+
         def paused_events(*args):
             yield event("decomposition", claims=["First extracted claim", "Second extracted claim"], total_claims=2)
-            raise StopException()
+            release.wait(5)
 
         self.send("Tell me two facts.", "Response to check")
         self.pipeline.run_factcheck.side_effect = paused_events
-        run = self.check(self.assistants()[0]["id"])
-        self.assertEqual(run["results"], [])
-        self.assertEqual(run["state"], "running")
-        text = self.rendered_text()
-        self.assertLess(text.index("First extracted claim"), text.index("Second extracted claim"))
-        self.assertIn("0 / 2 claims processed", text)
-        self.assertEqual(text.count('class="claim-spinner"'), 2)
-        self.assertEqual(sum(c.value == "Assessing check-worthiness…" for c in self.app.caption), 2)
-        self.assertNotIn('class="verdict', text)
+        response_id = self.assistants()[0]["id"]
+        try:
+            self.app.button(key=f"factcheck_{response_id}").click().run()
+            run = self.app.session_state["factchecks"][response_id]
+            self.assertEqual(run["results"], [])
+            self.assertEqual(run["state"], "running")
+            text = self.rendered_text()
+            self.assertLess(text.index("First extracted claim"), text.index("Second extracted claim"))
+            self.assertIn("0 / 2 claims processed", text)
+            self.assertEqual(text.count('class="claim-spinner"'), 2)
+            self.assertEqual(sum(c.value == "Assessing check-worthiness…" for c in self.app.caption), 2)
+            self.assertNotIn('class="verdict ', text)
+        finally:
+            release.set()
+            for job in self.app.session_state["factcheck_jobs"].values():
+                job.close()
 
     def test_pause_keeps_results_and_resume_continues_the_same_pipeline(self):
         started = Event()
@@ -594,6 +656,7 @@ class ChatUITest(unittest.TestCase):
                 job.close()
 
     def test_retrieved_evidence_is_visible_before_any_verification_finishes(self):
+        release = Event()
         result = claim_result("Retrieved claim")
         result["status"] = "verification"
         del result["evidences"][0]["verification"]
@@ -601,19 +664,29 @@ class ChatUITest(unittest.TestCase):
         def paused_events(*args):
             yield event("decomposition", claims=[result["claim"]], total_claims=1)
             yield event("retrieval", current_claim=1, total_claims=1, claim_update=result, progress=0.5)
-            raise StopException()
+            release.wait(5)
 
         self.send("Tell me a fact.", "Response to check")
         self.pipeline.run_factcheck.side_effect = paused_events
-        run = self.check(self.assistants()[0]["id"])
-        self.assertEqual(run["results"], [])
-        self.assertEqual([e.label for e in self.app.expander], ["Evidence passage"])
-        self.assertTrue(any(c.value == "Waiting for verification…" for c in self.app.caption))
-        self.assertIn("Source: test dataset", [t.value for t in self.app.text])
-        self.assertIn("Training step: 123", [t.value for t in self.app.text])
-        self.assertNotIn('class="verdict', self.rendered_text())
-
-        self.assertEqual(self.rendered_text().count('class="claim-spinner"'), 1)
+        response_id = self.assistants()[0]["id"]
+        try:
+            self.app.button(key=f"factcheck_{response_id}").click().run()
+            run = self.app.session_state["factchecks"][response_id]
+            self.assertEqual(run["results"], [])
+            self.assertEqual([e.label for e in self.app.expander], ["Evidence passage"])
+            self.assertTrue(any(c.value == "Waiting for verification…" for c in self.app.caption))
+            self.assertIn('class="evidence-source">test dataset</p>', self.rendered_text())
+            self.assertNotIn("Training step", self.rendered_text() + "\n".join(t.value for t in self.app.text))
+            self.assertNotIn('class="verdict ', self.rendered_text())
+            self.assertEqual(self.rendered_text().count('class="claim-spinner"'), 1)
+            # Polling without new events must preserve the visible evidence.
+            self.app.run()
+            self.assertEqual([e.label for e in self.app.expander], ["Evidence passage"])
+            self.assertIn('class="evidence-source">test dataset</p>', self.rendered_text())
+        finally:
+            release.set()
+            for job in self.app.session_state["factcheck_jobs"].values():
+                job.close()
 
     def test_partial_pair_verdict_and_later_claim_survive_failure_in_original_positions(self):
         partial = claim_result("First claim", ["Fully supported", "Fully refuted"])
@@ -733,7 +806,7 @@ class ChatUITest(unittest.TestCase):
             self.assertEqual(run["state"], "complete")
             self.assertEqual(run["results"], [skipped])
             self.assertTrue(any("Not check-worthy" in caption.value for caption in self.app.caption))
-            self.assertNotIn('class="verdict', self.rendered_text())
+            self.assertNotIn('class="verdict ', self.rendered_text())
             self.assertIn("1 / 1 claims processed", self.rendered_text())
             self.assertEqual(len(self.app.expander), 0)
             self.assert_processing_finished()
@@ -751,7 +824,8 @@ class ChatUITest(unittest.TestCase):
         run = self.check(self.assistants()[0]["id"])
         self.assertEqual(run["state"], "error")
         self.assertEqual(run["results"], [])
-        self.assertTrue(any("Invalid check-worthiness labels" in error.value for error in self.app.error))
+        self.assertTrue(any("Unable to complete the fact-check" in error.value for error in self.app.error))
+        self.assertFalse(any("Invalid check-worthiness labels" in error.value for error in self.app.error))
         self.assert_processing_finished()
 
     def test_empty_decomposition_is_explained(self):
@@ -971,6 +1045,35 @@ class ChatUITest(unittest.TestCase):
                 self.assertIn(f'<div class="message-author">{expected_chat_engine}</div>', self.rendered_text())
                 config = self.pipeline.run_factcheck.call_args.args[2]
                 self.assertEqual(config.engine, expected_engine)
+
+
+class ResultSummaryTests(unittest.TestCase):
+    def test_partial_pair_counts_exclude_skipped_missing_evidence_and_pending_outputs(self):
+        module = load_ui_module()
+        partial = claim_result(labels=["Fully supported", "Fully supported", "Not enough information"])
+        partial["status"] = "verification"
+        partial["evidences"].append({"passage": "Pending evidence"})
+        skipped = {"claim": "Opinion", "is_checkworthy": False, "evidences": []}
+        no_evidence = {"claim": "No source", "is_checkworthy": True, "no_evidence": True, "evidences": []}
+        run = {"claim_states": [partial, skipped, no_evidence], "results": [skipped, no_evidence]}
+        for state in ("running", "paused", "error", "interrupted"):
+            with self.subTest(state=state):
+                summary = module._summarize_results(dict(run, state=state))
+                self.assertEqual(summary["verdicts"], 3)
+                self.assertEqual(summary["labels"]["Fully supported"], 2)
+                self.assertEqual(summary["labels"]["Not enough information"], 1)
+                self.assertEqual(summary["labels"]["Fully refuted"], 0)
+                self.assertEqual(summary["skipped_claims"], 1)
+                self.assertEqual(summary["claims_without_evidence"], 1)
+
+    def test_summary_handles_initial_and_historical_results(self):
+        module = load_ui_module()
+        initial = module._summarize_results({"claim_states": [{"claim": "Pending", "evidences": []}]})
+        self.assertEqual(initial["verdicts"], 0)
+        self.assertEqual(initial["labels"], dict.fromkeys(LABELS, 0))
+        historical = module._summarize_results({"results": [claim_result(labels=LABELS)]})
+        self.assertEqual(historical["verdicts"], 6)
+        self.assertEqual(historical["labels"], dict.fromkeys(LABELS, 1))
 
 
 if __name__ == "__main__":

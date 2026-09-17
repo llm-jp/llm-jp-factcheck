@@ -20,6 +20,9 @@ from pipeline import PipelineConfig, run_factcheck
 
 logger = logging.getLogger(__name__)
 DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+FACTCHECK_ERROR_MESSAGE = "Unable to complete the fact-check. Please try again."
+CHAT_ERROR_MESSAGE = "Unable to generate a response. Please select Retry response."
+CHAT_INTERRUPTED_MESSAGE = "Response generation was interrupted. Select Retry response to try again."
 
 LABELS = {
     "Fully supported": "supported",
@@ -194,14 +197,57 @@ def _render_result(result: dict, index: int, *, stopped: bool = False, paused: b
                             f'<p class="rationale">{_text(verification["rationale"])}</p>',
                             unsafe_allow_html=True,
                         )
+            st.markdown(
+                '<div class="section-label">Source</div>'
+                f'<p class="evidence-source">{_text(evidence.get("dataset") or "Not available")}</p>',
+                unsafe_allow_html=True,
+            )
             with st.expander("Evidence passage", expanded=False):
                 st.markdown(
                     f'<div class="evidence-passage">{_text(evidence["passage"])}</div>',
                     unsafe_allow_html=True,
                 )
-                st.text(f"Source: {evidence.get('dataset') or 'Not available'}")
-                training_step = evidence.get("training_step")
-                st.text(f"Training step: {training_step if training_step is not None else 'Not available'}")
+
+
+def _summarize_results(run: dict) -> dict:
+    """Count completed evidence verdicts from the latest claim snapshots."""
+    counts = dict.fromkeys(LABELS, 0)
+    skipped = without_evidence = 0
+    for result in run.get("claim_states", run.get("results", [])):
+        if result.get("is_checkworthy") is False:
+            skipped += 1
+            continue
+        if result.get("no_evidence"):
+            without_evidence += 1
+            continue
+        for evidence in result.get("evidences", []):
+            label = (evidence.get("verification") or {}).get("label")
+            if label in counts:
+                counts[label] += 1
+    return {
+        "labels": counts,
+        "verdicts": sum(counts.values()),
+        "skipped_claims": skipped,
+        "claims_without_evidence": without_evidence,
+    }
+
+
+def _render_summary(run: dict) -> None:
+    summary = _summarize_results(run)
+    cards = "".join(
+        f'<div class="verdict-summary-card {style}" data-verdict="{_text(label)}">'
+        f"<dt>{_text(label)}</dt><dd>{summary['labels'][label]}</dd></div>"
+        for label, style in LABELS.items()
+    )
+    st.markdown(
+        '<section class="verdict-summary" aria-label="Verdict summary">'
+        '<div class="summary-totals">'
+        f"<span>Evidence verdicts <strong>{summary['verdicts']}</strong></span>"
+        f"<span>Skipped claims <strong>{summary['skipped_claims']}</strong></span>"
+        f"<span>Claims without evidence <strong>{summary['claims_without_evidence']}</strong></span>"
+        f'</div><dl class="verdict-summary-grid">{cards}</dl></section>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_results(run: dict) -> None:
@@ -218,6 +264,7 @@ def _render_results(run: dict) -> None:
             f'<span class="results-count">{len(results)} / {len(claims)} claims processed</span></div>',
             unsafe_allow_html=True,
         )
+        _render_summary(run)
         if run.get("mock"):
             st.caption("Synthetic results for interface testing.")
         # Keep every claim in its original position while individual results arrive.
@@ -290,12 +337,13 @@ def _start_factcheck(response: dict, preceding_messages: list[dict], args: argpa
             verification_prompt=args.verification_prompt,
         )
         st.session_state["factcheck_jobs"][response["id"]] = FactcheckJob(factcheck(run["document"], context, config))
-    except Exception as exc:
+    except Exception:
+        logger.exception("Fact-checking could not start")
         run["state"] = "error"
-        run["error"] = str(exc)
+        run["error"] = FACTCHECK_ERROR_MESSAGE
 
 
-def _run_factcheck(response_id: str, results_area) -> None:
+def _run_factcheck(response_id: str) -> None:
     run = st.session_state["factchecks"][response_id]
     job = st.session_state["factcheck_jobs"][response_id]
     try:
@@ -323,16 +371,13 @@ def _run_factcheck(response_id: str, results_area) -> None:
                 run["claim_states"][event.current_claim - 1] = event.result
                 run["completed_results"][event.current_claim - 1] = event.result
                 run["results"] = [run["completed_results"][index] for index in sorted(run["completed_results"])]
-            if event.claims is not None or event.claim_update is not None or event.stage == "claim_complete":
-                with results_area.container():
-                    _render_results(run)
             if event.stage == "complete":
                 run["state"] = "complete"
                 break
-    except Exception as exc:
+    except Exception:
         logger.exception("Fact-checking failed")
         run["state"] = "error"
-        run["error"] = str(exc)
+        run["error"] = FACTCHECK_ERROR_MESSAGE
     finally:
         if run["state"] in {"complete", "error"} or (
             job.pending is not None and job.pending.done() and job.pending.exception() is not None
@@ -369,35 +414,35 @@ def _response_controls(message: dict, index: int, args: argparse.Namespace) -> N
     run = st.session_state["factchecks"].get(response_id)
     if run and run["state"] in {"running", "paused"} and response_id not in st.session_state["factcheck_jobs"]:
         run["state"] = "interrupted"
-    button_area = st.empty()
-    with button_area.container():
+    # Apply queued events before emitting UI elements. Replacing an st.empty()
+    # results tree for every event briefly collapses it and moves the viewport.
+    if run and run["state"] == "running":
+        _run_factcheck(response_id)
+        if run["state"] != "running":
+            st.rerun()
+    with st.container(key=f"factcheck_action_{response_id}"):
         _factcheck_button(response_id)
-    activity_area = st.empty()
-    results_area = st.empty()
     if run:
-        with results_area.container():
-            _render_results(run)
-        if run["state"] == "running":
-            _run_factcheck(response_id, results_area)
-            if run["state"] != "running":
-                st.rerun()
-        if run["state"] == "running":
-            with activity_area.container():
+        with st.container(key=f"factcheck_activity_{response_id}"):
+            if run["state"] == "running":
                 st.progress(run["progress"])
                 st.markdown(_progress_message(run["message"]), unsafe_allow_html=True)
-        elif run["state"] == "complete":
-            activity_area.caption("Fact-check complete")
-        elif run["state"] == "paused":
-            with activity_area.container():
+            elif run["state"] == "complete":
+                # Explicitly clear any progress or error left by an earlier run.
+                st.empty()
+            elif run["state"] == "paused":
                 st.progress(run["progress"])
                 st.caption(
                     "Fact-check paused. Requests already sent may finish; no new requests will start. Resume to continue."
                 )
-        elif run["state"] == "error":
-            activity_area.error(f"Fact-checking failed: {run['error']}. Available results have been retained.")
-        else:
-            activity_area.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
-        with results_area.container():
+            elif run["state"] == "error":
+                message = FACTCHECK_ERROR_MESSAGE
+                if run.get("claim_states") or run.get("results"):
+                    message += " Available results are shown below."
+                st.error(message)
+            elif run["state"] == "interrupted":
+                st.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
+        with st.container(key=f"factcheck_results_{response_id}"):
             _render_results(run)
 
 
@@ -498,9 +543,9 @@ def _generate_response(args: argparse.Namespace) -> None:
                 content = "".join(fragments)
                 if not content.strip():
                     raise ValueError("The model returned an empty response.")
-            except Exception as exc:
+            except Exception:
                 logger.exception("Response generation failed")
-                st.session_state["chat_error"] = str(exc)
+                st.session_state["chat_error"] = CHAT_ERROR_MESSAGE
             else:
                 message = {"id": uuid4().hex, "role": "assistant", "content": content, "model": display_model}
                 st.session_state["messages"].append(message)
@@ -603,10 +648,15 @@ def main(args: argparse.Namespace) -> None:
         and st.session_state["messages"][-1]["role"] == "user"
         and not st.session_state["chat_error"]
     ):
-        st.session_state["chat_error"] = "Response generation was interrupted. Select Retry response to try again."
+        st.session_state["chat_error"] = CHAT_INTERRUPTED_MESSAGE
 
     if st.session_state["chat_error"]:
-        st.error(f"Response generation failed: {st.session_state['chat_error']}")
+        # Older sessions may still contain exception text; display only known messages.
+        st.error(
+            CHAT_INTERRUPTED_MESSAGE
+            if st.session_state["chat_error"] == CHAT_INTERRUPTED_MESSAGE
+            else CHAT_ERROR_MESSAGE
+        )
         st.button("Retry response", key="retry_response", on_click=_request_response)
     if st.session_state["messages"]:
         if st.session_state.get("input_error"):

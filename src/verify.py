@@ -6,7 +6,7 @@ from clients import get_client
 from prompts import PROMPT_DIR, render_prompt
 from utils import parse_json_response
 
-DEFAULT_PROMPT_PATH = PROMPT_DIR / "verification.json"
+DEFAULT_PROMPT_PATH = PROMPT_DIR / "verification.yaml"
 VERIFICATION_LABELS = (
     "Fully supported",
     "Inferentially supported",
@@ -27,8 +27,12 @@ RESPONSE_FORMAT = {
             "type": "object",
             "properties": {
                 "label": {"type": "string", "enum": list(MODEL_LABELS)},
+                "rationale": {
+                    "type": "string",
+                    "description": "A brief justification in one English sentence of at most 40 words.",
+                },
             },
-            "required": ["label"],
+            "required": ["label", "rationale"],
             "additionalProperties": False,
         },
     },
@@ -42,7 +46,7 @@ def verify_claim(
     *,
     prompt_path: str | Path | None = None,
 ) -> dict[str, str]:
-    """Predict a base verdict without requesting reasoning or demonstrations."""
+    """Predict a six-class verdict with a brief evidence-based justification."""
     if not isinstance(claim, str) or not claim.strip():
         raise ValueError("claim must be a nonempty string.")
     if not isinstance(evidence, str):
@@ -60,9 +64,12 @@ def verify_claim(
         response_format=RESPONSE_FORMAT,
     )
     payload = parse_json_response(response)
-    if set(payload) != {"label"}:
-        raise ValueError("Verification response must contain exactly 'label'.")
+    if set(payload) != {"label", "rationale"}:
+        raise ValueError("Verification response must contain exactly 'label' and 'rationale'.")
     label = payload["label"]
     if not isinstance(label, str) or label not in MODEL_LABELS:
         raise ValueError(f"Verification response 'label' must be one of {tuple(MODEL_LABELS)}.")
-    return {"label": MODEL_LABELS[label]}
+    rationale = payload["rationale"]
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("Verification response 'rationale' must be a nonempty string.")
+    return {"label": MODEL_LABELS[label], "rationale": rationale.strip()}

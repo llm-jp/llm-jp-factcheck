@@ -126,9 +126,9 @@ def main() -> None:
         raise ValueError("No saved evaluation protocol found.")
     else:
         write_json(protocol_path, protocol)
-        (output / "prompt.json").write_bytes(prompt_bytes)
+        (output / "prompt.yaml").write_bytes(prompt_bytes)
         write_json(output / "gold.json", gold)
-    if digest((output / "prompt.json").read_bytes()) != protocol["prompt_sha256"]:
+    if digest((output / "prompt.yaml").read_bytes()) != protocol["prompt_sha256"]:
         raise ValueError("Saved prompt snapshot differs from the evaluation protocol.")
     if json.loads((output / "gold.json").read_text()) != gold:
         raise ValueError("Saved gold data differs from the evaluation protocol.")
@@ -158,7 +158,7 @@ def main() -> None:
                     decompose_document_into_claims,
                     row["text"],
                     args.model,
-                    prompt_path=output / "prompt.json",
+                    prompt_path=output / "prompt.yaml",
                 ): row
                 for row in pending
             }

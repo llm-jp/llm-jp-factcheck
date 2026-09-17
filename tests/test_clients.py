@@ -78,7 +78,7 @@ class ClientTests(unittest.TestCase):
             payloads = {
                 "decomposition": {"claims": ["Kyoto is in Japan."]},
                 "checkworthiness": {"label": True},
-                "verification": {"label": "完全支持"},
+                "verification": {"label": "完全支持", "rationale": "The passage states that Kyoto is in Japan."},
             }
             message["content"] = json.dumps(payloads[schema_name])
         return httpx.Response(
