@@ -1,0 +1,263 @@
+{
+  "completed_at": "2026-09-17T07:46:00.287909+00:00",
+  "protocol": {
+    "source": {
+      "repository": "llm-jp-evidence-verification-dataset",
+      "revision": "e43e3898959860caa0feaf1708e820ecec330584",
+      "prompt_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl.txt",
+      "test_source": "data/aio_test.json",
+      "gold_source": "data/claim_decomposition/AIO.json",
+      "fewshot_source": "scripts/prompts/decomposition/fewshot/8shot.txt",
+      "fewshot_document_ids": [
+        "AIO02-0044",
+        "AIO02-0038",
+        "AIO02-0081",
+        "AIO02-0092",
+        "AIO02-0053",
+        "AIO02-0060",
+        "AIO02-0069",
+        "AIO02-0074"
+      ],
+      "additional_shots": 8,
+      "incomplete_guideline_8shot_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl_8shot.txt",
+      "adaptation": "Use the existing zero-shot guideline plus all eight fewshot examples; the guideline_8shot source contains only the first six. Adapt example outputs to the application claims object."
+    },
+    "dataset": "AIO test",
+    "documents": 210,
+    "gold_claims": 1169,
+    "model": "gpt-oss-120b",
+    "runs": 5,
+    "prompt_sha256": "dea1d5cd4199313edc64bbd9fb48c59492f44c4a7d471c2853c5a13c9ebfcbda",
+    "gold_sha256": "a9d9ca91f3df01262d9625837e8c505d202f667741f8513bddb8ea0e22d3ab50",
+    "implementation_sha256": {
+      "decompose.py": "5e3aab5a21818aaf4b6c4016179ed66bb2966fdf4028ef5e902f0c616109e930",
+      "claim_metrics.py": "80328210a31bdbd4d0e0755939ada398c230fee77b9ca47e7c9109ec058b2769"
+    },
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "decomposition",
+        "strict": true,
+        "description": "Create a list of self-contained claims from generated text.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "description": "Claims in the same language and order as the source text.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "claims"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "context": "none (generated text only, as in the reference experiment)",
+    "sampling": "provider defaults; no temperature, top_p, or seed override",
+    "matching": "maximum-weight one-to-one assignment, then similarity >= threshold",
+    "fuzzy_threshold": 0.8,
+    "tokenizer": "MeCab, UniDic-lite, POS noun/verb/adjective/adverb; feature[10] with surface fallback",
+    "aggregation": "macro P/R/F1 across documents, then mean and population SD across independent runs",
+    "versions": {
+      "openai": "2.54.0",
+      "mecab-python3": "1.0.12",
+      "unidic-lite": "1.0.8",
+      "scipy": "1.18.1"
+    }
+  },
+  "runs": [
+    {
+      "exact": {
+        "precision": 0.18980252784874632,
+        "recall": 0.17072121000692428,
+        "f1": 0.17742479457738192
+      },
+      "fuzzy_content": {
+        "precision": 0.5552147634500576,
+        "recall": 0.4881179799036942,
+        "f1": 0.5111760114833976
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.1668272864701436,
+        "recall": 0.15088863517434944,
+        "f1": 0.1561023895183559
+      },
+      "fuzzy_content": {
+        "precision": 0.534618291761149,
+        "recall": 0.46166494880780595,
+        "f1": 0.4874161002941778
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.18202758881330308,
+        "recall": 0.16173096744525317,
+        "f1": 0.16874785780668133
+      },
+      "fuzzy_content": {
+        "precision": 0.5544160997732426,
+        "recall": 0.48306534735106166,
+        "f1": 0.508447279815108
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.17269291555005842,
+        "recall": 0.15762248333676904,
+        "f1": 0.16246771006280072
+      },
+      "fuzzy_content": {
+        "precision": 0.5313536727822442,
+        "recall": 0.4693238639667211,
+        "f1": 0.48842424071154783
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.17793295095816103,
+        "recall": 0.1589719143290572,
+        "f1": 0.16538830178234823
+      },
+      "fuzzy_content": {
+        "precision": 0.5382145080254324,
+        "recall": 0.47388924567495994,
+        "f1": 0.496545617169035
+      }
+    }
+  ],
+  "mean": {
+    "exact": {
+      "precision": 0.1778566539280825,
+      "recall": 0.1599870420584706,
+      "f1": 0.16602621074951363
+    },
+    "fuzzy_content": {
+      "precision": 0.5427634671584252,
+      "recall": 0.47521227714084857,
+      "f1": 0.49840184989465325
+    }
+  },
+  "std": {
+    "exact": {
+      "precision": 0.007853885195759676,
+      "recall": 0.006444629816904881,
+      "f1": 0.007055312307764035
+    },
+    "fuzzy_content": {
+      "precision": 0.010080068902053091,
+      "recall": 0.009467648097195908,
+      "f1": 0.009876991908561141
+    }
+  },
+  "reference_parity": {
+    "reference_revision": "e43e3898959860caa0feaf1708e820ecec330584",
+    "reference_file": "scripts/evaluate_claim_decomposition.py",
+    "runs": 5,
+    "document_metric_comparisons": 2100,
+    "mismatches": []
+  },
+  "runtime": {
+    "api_type": "openai",
+    "max_concurrency": 8,
+    "request_timeout_seconds": 120,
+    "sdk_max_retries": 2,
+    "reasoning_effort": "not overridden",
+    "verification_evaluation_running_concurrently": true
+  },
+  "prediction_counts": [
+    {
+      "run": 1,
+      "documents": 210,
+      "predicted_claims": 975,
+      "empty_documents": []
+    },
+    {
+      "run": 2,
+      "documents": 210,
+      "predicted_claims": 967,
+      "empty_documents": []
+    },
+    {
+      "run": 3,
+      "documents": 210,
+      "predicted_claims": 959,
+      "empty_documents": []
+    },
+    {
+      "run": 4,
+      "documents": 210,
+      "predicted_claims": 966,
+      "empty_documents": []
+    },
+    {
+      "run": 5,
+      "documents": 210,
+      "predicted_claims": 965,
+      "empty_documents": []
+    }
+  ],
+  "comparison": {
+    "baseline": "decomposition_guideline_8shot.json",
+    "baseline_mean": {
+      "exact": {
+        "precision": 0.26599253967321196,
+        "recall": 0.236353342424771,
+        "f1": 0.24679991069752238
+      },
+      "fuzzy_content": {
+        "precision": 0.606192970195071,
+        "recall": 0.5289251145679718,
+        "f1": 0.5566848752678215
+      }
+    },
+    "baseline_std": {
+      "exact": {
+        "precision": 0.008501130705761134,
+        "recall": 0.008636488258918763,
+        "f1": 0.00847001814031167
+      },
+      "fuzzy_content": {
+        "precision": 0.009377606814186272,
+        "recall": 0.012923934765899071,
+        "f1": 0.011653349814271562
+      }
+    },
+    "matched_protocol_fields": [
+      "source",
+      "dataset",
+      "documents",
+      "gold_claims",
+      "runs",
+      "gold_sha256",
+      "response_format",
+      "context",
+      "sampling",
+      "matching",
+      "fuzzy_threshold",
+      "tokenizer",
+      "aggregation",
+      "versions"
+    ],
+    "parsed_prompt_templates_identical": true,
+    "decomposition_implementation_difference": "Only the default prompt path changed from decomposition.json to decomposition_8shot.yaml; both evaluations pass the eight-shot snapshot explicitly.",
+    "delta": {
+      "exact": {
+        "precision": -0.08813588574512946,
+        "recall": -0.07636630036630038,
+        "f1": -0.08077369994800876
+      },
+      "fuzzy_content": {
+        "precision": -0.06342950303664585,
+        "recall": -0.05371283742712318,
+        "f1": -0.05828302537316826
+      }
+    }
+  }
+}

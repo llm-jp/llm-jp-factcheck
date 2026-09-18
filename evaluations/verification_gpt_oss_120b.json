@@ -1,0 +1,1834 @@
+{
+  "completed_at": "2026-09-17T07:38:15.926731+00:00",
+  "protocol": {
+    "source": {
+      "repository": "llm-jp-evidence-verification-dataset",
+      "branch": "feat/verdict_prediction",
+      "revision": "cecf2a1d2c05a71dbc8460a1476ba051d18db807",
+      "prompt_source": "scripts/prompts/verdict_prediction/6class_base_1224.txt",
+      "test_source": "data/verdict_prediction/AIO_test.json",
+      "question_source": "data/claim_decomposition/AIO.json",
+      "reference_predictions": [
+        "data/results/verdict_predicted/new/result_6class_base_1224_4.json",
+        "data/results/verdict_predicted/new/result_6class_base_1224_5.json",
+        "data/results/verdict_predicted/new/result_6class_base_1224_6.json"
+      ]
+    },
+    "model": "gpt-oss-120b",
+    "runs": 3,
+    "dataset": "AIO test, excluding original-input evidence",
+    "pairs": 5682,
+    "excluded_input_evidence": 1142,
+    "gold_sha256": "a9218c1b75ac5ae5794ecbc46d2d74cbcce1ae2fd81bbc225b3799c3e994b49b",
+    "prompt_sha256": "17189a1c43bb10824405702c01a1a751066c5cb10ecf689b84ae00ca5a105f9d",
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "verification",
+        "strict": true,
+        "description": "Assign one of the six verdict labels to one claim-evidence pair.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "enum": [
+                "完全支持",
+                "推定支持",
+                "部分支持",
+                "完全否定",
+                "推定否定",
+                "不明"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "A brief justification in one English sentence of at most 40 words."
+            }
+          },
+          "required": [
+            "label",
+            "rationale"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "implementation_sha256": {
+      "verify.py": "6ec98d6476c4e44b48300538a4f5059f84731f75589bdb7e11500b8f1ff594c0",
+      "verdict_metrics.py": "7c5c690af25a15b0b38ac0c494b319110ec7f14a178e8372960c69df7683b75a"
+    },
+    "versions": {
+      "openai": "2.54.0"
+    },
+    "sampling": "provider defaults; no temperature, top_p, seed, or reasoning-effort override",
+    "output": "Japanese label mapped to English, followed by a short English rationale (one sentence, at most 40 words)",
+    "aggregation": "pair accuracy; macro P/R/F1 over the fixed six labels; mean and population SD over runs",
+    "errors": "explicit failed predictions count as incorrect; no missing pair is silently excluded"
+  },
+  "runs": [
+    {
+      "count": 5682,
+      "errors": 1,
+      "accuracy": 0.6571629707849349,
+      "macro": {
+        "precision": 0.4103952812555108,
+        "recall": 0.4830969945691468,
+        "f1": 0.4206329840614139
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.6759483454398708,
+          "recall": 0.8938100320170758,
+          "f1": 0.7697610294117646,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.2042079207920792,
+          "recall": 0.27918781725888325,
+          "f1": 0.23588277340957825,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.28735632183908044,
+          "recall": 0.2840909090909091,
+          "f1": 0.2857142857142857,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.2961165048543689,
+          "recall": 0.7011494252873564,
+          "f1": 0.41638225255972694,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.044444444444444446,
+          "recall": 0.12121212121212122,
+          "f1": 0.06504065040650406,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9542981501632208,
+          "recall": 0.6191316625485351,
+          "f1": 0.7510169128666239,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1675,
+            113,
+            35,
+            18,
+            12,
+            21,
+            0
+          ],
+          [
+            359,
+            165,
+            25,
+            7,
+            9,
+            26,
+            0
+          ],
+          [
+            100,
+            49,
+            75,
+            11,
+            2,
+            26,
+            1
+          ],
+          [
+            6,
+            3,
+            0,
+            61,
+            9,
+            8,
+            0
+          ],
+          [
+            2,
+            5,
+            4,
+            15,
+            4,
+            3,
+            0
+          ],
+          [
+            336,
+            473,
+            122,
+            94,
+            54,
+            1754,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "count": 5682,
+      "errors": 0,
+      "accuracy": 0.6520591341077085,
+      "macro": {
+        "precision": 0.4098846492702969,
+        "recall": 0.48995170313971087,
+        "f1": 0.4213294729203353
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.6712163789642713,
+          "recall": 0.8922091782283885,
+          "f1": 0.766093928980527,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.19876543209876543,
+          "recall": 0.272419627749577,
+          "f1": 0.22983583154889364,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.2748091603053435,
+          "recall": 0.2727272727272727,
+          "f1": 0.27376425855513303,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.28780487804878047,
+          "recall": 0.6781609195402298,
+          "f1": 0.4041095890410958,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.07291666666666667,
+          "recall": 0.21212121212121213,
+          "f1": 0.10852713178294575,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9537953795379538,
+          "recall": 0.6120720084715849,
+          "f1": 0.7456460976134166,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1672,
+            108,
+            41,
+            20,
+            10,
+            23,
+            0
+          ],
+          [
+            363,
+            161,
+            25,
+            8,
+            7,
+            27,
+            0
+          ],
+          [
+            96,
+            55,
+            72,
+            13,
+            6,
+            22,
+            0
+          ],
+          [
+            5,
+            3,
+            4,
+            59,
+            8,
+            8,
+            0
+          ],
+          [
+            0,
+            4,
+            3,
+            15,
+            7,
+            4,
+            0
+          ],
+          [
+            355,
+            479,
+            117,
+            90,
+            58,
+            1734,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "count": 5682,
+      "errors": 0,
+      "accuracy": 0.6518831397395284,
+      "macro": {
+        "precision": 0.4004773892407232,
+        "recall": 0.46789658203932727,
+        "f1": 0.40874266535163994
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.678951678951679,
+          "recall": 0.8847385272145144,
+          "f1": 0.7683039851714552,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.2066905615292712,
+          "recall": 0.2927241962774958,
+          "f1": 0.242296918767507,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.26492537313432835,
+          "recall": 0.2689393939393939,
+          "f1": 0.2669172932330827,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.2676056338028169,
+          "recall": 0.6551724137931034,
+          "f1": 0.38,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.03225806451612903,
+          "recall": 0.09090909090909091,
+          "f1": 0.047619047619047616,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9524330235101148,
+          "recall": 0.614895870102365,
+          "f1": 0.7473187473187473,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1658,
+            122,
+            40,
+            15,
+            17,
+            22,
+            0
+          ],
+          [
+            355,
+            173,
+            23,
+            8,
+            7,
+            25,
+            0
+          ],
+          [
+            95,
+            58,
+            71,
+            8,
+            4,
+            28,
+            0
+          ],
+          [
+            4,
+            4,
+            4,
+            57,
+            10,
+            8,
+            0
+          ],
+          [
+            0,
+            4,
+            2,
+            20,
+            3,
+            4,
+            0
+          ],
+          [
+            330,
+            476,
+            128,
+            105,
+            52,
+            1742,
+            0
+          ]
+        ]
+      }
+    }
+  ],
+  "mean": {
+    "accuracy": 0.6537017482107239,
+    "precision": 0.4069191065888436,
+    "recall": 0.480315093249395,
+    "f1": 0.41690170744446303
+  },
+  "std": {
+    "accuracy": 0.002448508360285019,
+    "precision": 0.00455974985065977,
+    "recall": 0.009216337772411706,
+    "f1": 0.005776316593758508
+  },
+  "runtime": {
+    "api_type": "openai",
+    "max_concurrency": 32,
+    "request_timeout_seconds": 60,
+    "sdk_max_retries": 2,
+    "retry_errors": false
+  },
+  "baseline": {
+    "report": "verification_rationale.json",
+    "mean": {
+      "accuracy": 0.6256013140912824,
+      "precision": 0.4019058881383397,
+      "recall": 0.4968350921140366,
+      "f1": 0.40283733533307015
+    },
+    "std": {
+      "accuracy": 0.0020790854331419924,
+      "precision": 0.0027093982676671988,
+      "recall": 0.0034920684223963823,
+      "f1": 0.0025264041666179207
+    },
+    "protocol": {
+      "source": {
+        "repository": "llm-jp-evidence-verification-dataset",
+        "branch": "feat/verdict_prediction",
+        "revision": "cecf2a1d2c05a71dbc8460a1476ba051d18db807",
+        "prompt_source": "scripts/prompts/verdict_prediction/6class_base_1224.txt",
+        "test_source": "data/verdict_prediction/AIO_test.json",
+        "question_source": "data/claim_decomposition/AIO.json",
+        "reference_predictions": [
+          "data/results/verdict_predicted/new/result_6class_base_1224_4.json",
+          "data/results/verdict_predicted/new/result_6class_base_1224_5.json",
+          "data/results/verdict_predicted/new/result_6class_base_1224_6.json"
+        ]
+      },
+      "model": "gpt-5.4-2026-03-05",
+      "runs": 3,
+      "dataset": "AIO test, excluding original-input evidence",
+      "pairs": 5682,
+      "excluded_input_evidence": 1142,
+      "gold_sha256": "a9218c1b75ac5ae5794ecbc46d2d74cbcce1ae2fd81bbc225b3799c3e994b49b",
+      "prompt_sha256": "17189a1c43bb10824405702c01a1a751066c5cb10ecf689b84ae00ca5a105f9d",
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "verification",
+          "strict": true,
+          "description": "Assign one of the six verdict labels to one claim-evidence pair.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "enum": [
+                  "完全支持",
+                  "推定支持",
+                  "部分支持",
+                  "完全否定",
+                  "推定否定",
+                  "不明"
+                ]
+              },
+              "rationale": {
+                "type": "string",
+                "description": "A brief justification in one English sentence of at most 40 words."
+              }
+            },
+            "required": [
+              "label",
+              "rationale"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "implementation_sha256": {
+        "verify.py": "6ec98d6476c4e44b48300538a4f5059f84731f75589bdb7e11500b8f1ff594c0",
+        "verdict_metrics.py": "7c5c690af25a15b0b38ac0c494b319110ec7f14a178e8372960c69df7683b75a"
+      },
+      "versions": {
+        "openai": "2.54.0"
+      },
+      "sampling": "provider defaults; no temperature, top_p, seed, or reasoning-effort override",
+      "output": "Japanese label mapped to English, followed by a short English rationale (one sentence, at most 40 words)",
+      "aggregation": "pair accuracy; macro P/R/F1 over the fixed six labels; mean and population SD over runs",
+      "errors": "explicit failed predictions count as incorrect; no missing pair is silently excluded"
+    }
+  },
+  "matched_protocol_fields": [
+    "runs",
+    "dataset",
+    "pairs",
+    "excluded_input_evidence",
+    "gold_sha256",
+    "source",
+    "prompt_sha256",
+    "response_format",
+    "implementation_sha256",
+    "versions",
+    "sampling",
+    "output",
+    "aggregation",
+    "errors"
+  ],
+  "delta": {
+    "accuracy": 0.02810043411944152,
+    "precision": 0.005013218450503898,
+    "recall": -0.016519998864641616,
+    "f1": 0.014064372111392887
+  },
+  "per_label_mean": {
+    "Fully supported": {
+      "precision": 0.6753721344519403,
+      "recall": 0.8902525791533262,
+      "f1": 0.7680529811879155
+    },
+    "Inferentially supported": {
+      "precision": 0.20322130480670528,
+      "recall": 0.28144388042865204,
+      "f1": 0.2360051745753263
+    },
+    "Partially supported": {
+      "precision": 0.2756969517595841,
+      "recall": 0.27525252525252525,
+      "f1": 0.27546527916750047
+    },
+    "Fully refuted": {
+      "precision": 0.28384233890198873,
+      "recall": 0.6781609195402298,
+      "f1": 0.40016394720027426
+    },
+    "Inferentially refuted": {
+      "precision": 0.04987305854241338,
+      "recall": 0.1414141414141414,
+      "f1": 0.07372894326949914
+    },
+    "Not enough information": {
+      "precision": 0.9535088510704298,
+      "recall": 0.6153665137074951,
+      "f1": 0.7479939192662626
+    }
+  },
+  "errors": [
+    {
+      "run": 1,
+      "records": [
+        {
+          "ID": 6326,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "records": []
+    },
+    {
+      "run": 3,
+      "records": []
+    }
+  ],
+  "rationale_lengths": [
+    {
+      "run": 1,
+      "count": 5681,
+      "mean_words": 23.506248899841577,
+      "min_words": 5,
+      "max_words": 40,
+      "over_40_words": 0
+    },
+    {
+      "run": 2,
+      "count": 5682,
+      "mean_words": 23.534670890531505,
+      "min_words": 9,
+      "max_words": 41,
+      "over_40_words": 2
+    },
+    {
+      "run": 3,
+      "count": 5682,
+      "mean_words": 23.58905315029919,
+      "min_words": 9,
+      "max_words": 41,
+      "over_40_words": 2
+    }
+  ],
+  "metric_parity": {
+    "sklearn_version": "1.9.1",
+    "runs": [
+      {
+        "run": 1,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      },
+      {
+        "run": 2,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      },
+      {
+        "run": 3,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      }
+    ]
+  },
+  "matched_reference_comparison": {
+    "pairs": 5678,
+    "excluded_ids": [
+      5772,
+      7006,
+      11775,
+      12049
+    ],
+    "models": {
+      "gpt-oss-120b": {
+        "runs": [
+          {
+            "count": 5678,
+            "errors": 1,
+            "accuracy": 0.6570975695667488,
+            "macro": {
+              "precision": 0.4103753266194127,
+              "recall": 0.48314748331995255,
+              "f1": 0.42063764280960336
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.6758286176232822,
+                "recall": 0.8936397648316409,
+                "f1": 0.7696202531645571,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.2042079207920792,
+                "recall": 0.2796610169491525,
+                "f1": 0.23605150214592271,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.28735632183908044,
+                "recall": 0.2840909090909091,
+                "f1": 0.2857142857142857,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.2961165048543689,
+                "recall": 0.7011494252873564,
+                "f1": 0.41638225255972694,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.044444444444444446,
+                "recall": 0.12121212121212122,
+                "f1": 0.06504065040650406,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9542981501632208,
+                "recall": 0.6191316625485351,
+                "f1": 0.7510169128666239,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1672,
+                  113,
+                  35,
+                  18,
+                  12,
+                  21,
+                  0
+                ],
+                [
+                  358,
+                  165,
+                  25,
+                  7,
+                  9,
+                  26,
+                  0
+                ],
+                [
+                  100,
+                  49,
+                  75,
+                  11,
+                  2,
+                  26,
+                  1
+                ],
+                [
+                  6,
+                  3,
+                  0,
+                  61,
+                  9,
+                  8,
+                  0
+                ],
+                [
+                  2,
+                  5,
+                  4,
+                  15,
+                  4,
+                  3,
+                  0
+                ],
+                [
+                  336,
+                  473,
+                  122,
+                  94,
+                  54,
+                  1754,
+                  0
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 0,
+            "accuracy": 0.6519901373723141,
+            "macro": {
+              "precision": 0.4098635304870143,
+              "recall": 0.4899998521655775,
+              "f1": 0.42133245990262014
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.6710896662645758,
+                "recall": 0.892036344200962,
+                "f1": 0.7659476824231298,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.19876543209876543,
+                "recall": 0.27288135593220336,
+                "f1": 0.22999999999999998,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.2748091603053435,
+                "recall": 0.2727272727272727,
+                "f1": 0.27376425855513303,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.28780487804878047,
+                "recall": 0.6781609195402298,
+                "f1": 0.4041095890410958,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.07291666666666667,
+                "recall": 0.21212121212121213,
+                "f1": 0.10852713178294575,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9537953795379538,
+                "recall": 0.6120720084715849,
+                "f1": 0.7456460976134166,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1669,
+                  108,
+                  41,
+                  20,
+                  10,
+                  23,
+                  0
+                ],
+                [
+                  362,
+                  161,
+                  25,
+                  8,
+                  7,
+                  27,
+                  0
+                ],
+                [
+                  96,
+                  55,
+                  72,
+                  13,
+                  6,
+                  22,
+                  0
+                ],
+                [
+                  5,
+                  3,
+                  4,
+                  59,
+                  8,
+                  8,
+                  0
+                ],
+                [
+                  0,
+                  4,
+                  3,
+                  15,
+                  7,
+                  4,
+                  0
+                ],
+                [
+                  355,
+                  479,
+                  117,
+                  90,
+                  58,
+                  1734,
+                  0
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 0,
+            "accuracy": 0.651814019020782,
+            "macro": {
+              "precision": 0.400457961206529,
+              "recall": 0.4679484703863553,
+              "f1": 0.4087469112285559
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.6788351107465135,
+                "recall": 0.8845537145911277,
+                "f1": 0.7681596658157346,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.2066905615292712,
+                "recall": 0.29322033898305083,
+                "f1": 0.2424667133847232,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.26492537313432835,
+                "recall": 0.2689393939393939,
+                "f1": 0.2669172932330827,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.2676056338028169,
+                "recall": 0.6551724137931034,
+                "f1": 0.38,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.03225806451612903,
+                "recall": 0.09090909090909091,
+                "f1": 0.047619047619047616,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9524330235101148,
+                "recall": 0.614895870102365,
+                "f1": 0.7473187473187473,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1655,
+                  122,
+                  40,
+                  15,
+                  17,
+                  22,
+                  0
+                ],
+                [
+                  354,
+                  173,
+                  23,
+                  8,
+                  7,
+                  25,
+                  0
+                ],
+                [
+                  95,
+                  58,
+                  71,
+                  8,
+                  4,
+                  28,
+                  0
+                ],
+                [
+                  4,
+                  4,
+                  4,
+                  57,
+                  10,
+                  8,
+                  0
+                ],
+                [
+                  0,
+                  4,
+                  2,
+                  20,
+                  3,
+                  4,
+                  0
+                ],
+                [
+                  330,
+                  476,
+                  128,
+                  105,
+                  52,
+                  1742,
+                  0
+                ]
+              ]
+            }
+          }
+        ],
+        "mean": {
+          "accuracy": 0.6536339086532816,
+          "precision": 0.406898939437652,
+          "recall": 0.4803652686239618,
+          "f1": 0.41690567131359313
+        },
+        "std": {
+          "accuracy": 0.0024502332693095135,
+          "precision": 0.004559249517967822,
+          "recall": 0.009214893689174922,
+          "f1": 0.005776083868971245
+        }
+      },
+      "gpt-5.4-2026-03-05": {
+        "runs": [
+          {
+            "count": 5678,
+            "errors": 7,
+            "accuracy": 0.6268052131032054,
+            "macro": {
+              "precision": 0.40062374998411654,
+              "recall": 0.49989819090332677,
+              "f1": 0.4026412384658456
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7059356592659719,
+                "recall": 0.8327097808658471,
+                "f1": 0.7641000490436488,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.21328671328671328,
+                "recall": 0.4135593220338983,
+                "f1": 0.2814302191464821,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.233502538071066,
+                "recall": 0.17424242424242425,
+                "f1": 0.19956616052060738,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.22916666666666666,
+                "recall": 0.7586206896551724,
+                "f1": 0.35200000000000004,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.06060606060606061,
+                "recall": 0.24242424242424243,
+                "f1": 0.09696969696969698,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9612448620082208,
+                "recall": 0.5778326861983762,
+                "f1": 0.7217813051146383,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1558,
+                  221,
+                  43,
+                  18,
+                  15,
+                  14,
+                  2
+                ],
+                [
+                  287,
+                  244,
+                  22,
+                  9,
+                  11,
+                  17,
+                  0
+                ],
+                [
+                  82,
+                  87,
+                  46,
+                  6,
+                  11,
+                  31,
+                  1
+                ],
+                [
+                  6,
+                  7,
+                  1,
+                  66,
+                  3,
+                  4,
+                  0
+                ],
+                [
+                  2,
+                  6,
+                  2,
+                  15,
+                  8,
+                  0,
+                  0
+                ],
+                [
+                  272,
+                  579,
+                  83,
+                  174,
+                  84,
+                  1637,
+                  4
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 6,
+            "accuracy": 0.6225783726664318,
+            "macro": {
+              "precision": 0.3993950389373403,
+              "recall": 0.4920019242061462,
+              "f1": 0.3998448592967513
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7027027027027027,
+                "recall": 0.8337787279529664,
+                "f1": 0.7626497188951358,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.20210896309314588,
+                "recall": 0.3898305084745763,
+                "f1": 0.2662037037037037,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.25,
+                "recall": 0.19696969696969696,
+                "f1": 0.22033898305084745,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.22807017543859648,
+                "recall": 0.7471264367816092,
+                "f1": 0.34946236559139787,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.051470588235294115,
+                "recall": 0.21212121212121213,
+                "f1": 0.08284023668639053,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9620178041543027,
+                "recall": 0.5721849629368161,
+                "f1": 0.7175741478530324,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1560,
+                  227,
+                  39,
+                  20,
+                  13,
+                  10,
+                  2
+                ],
+                [
+                  294,
+                  230,
+                  25,
+                  7,
+                  13,
+                  21,
+                  0
+                ],
+                [
+                  79,
+                  89,
+                  52,
+                  4,
+                  13,
+                  26,
+                  1
+                ],
+                [
+                  5,
+                  6,
+                  1,
+                  65,
+                  4,
+                  6,
+                  0
+                ],
+                [
+                  2,
+                  6,
+                  2,
+                  15,
+                  7,
+                  1,
+                  0
+                ],
+                [
+                  280,
+                  580,
+                  89,
+                  174,
+                  86,
+                  1621,
+                  3
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 6,
+            "accuracy": 0.6271574498062699,
+            "macro": {
+              "precision": 0.4056597103485418,
+              "recall": 0.49881791954087296,
+              "f1": 0.40602662473300777
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7110009017132551,
+                "recall": 0.8428647781934794,
+                "f1": 0.7713377353876253,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.20692567567567569,
+                "recall": 0.4152542372881356,
+                "f1": 0.2762119503945885,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.2552083333333333,
+                "recall": 0.1856060606060606,
+                "f1": 0.2149122807017544,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.23272727272727273,
+                "recall": 0.735632183908046,
+                "f1": 0.3535911602209945,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.06557377049180328,
+                "recall": 0.24242424242424243,
+                "f1": 0.10322580645161289,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9625223081499108,
+                "recall": 0.5711260148252736,
+                "f1": 0.7168808152414711,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1577,
+                  214,
+                  39,
+                  19,
+                  9,
+                  11,
+                  2
+                ],
+                [
+                  290,
+                  245,
+                  20,
+                  7,
+                  10,
+                  18,
+                  0
+                ],
+                [
+                  83,
+                  86,
+                  49,
+                  5,
+                  11,
+                  29,
+                  1
+                ],
+                [
+                  6,
+                  7,
+                  1,
+                  64,
+                  4,
+                  5,
+                  0
+                ],
+                [
+                  1,
+                  8,
+                  0,
+                  16,
+                  8,
+                  0,
+                  0
+                ],
+                [
+                  261,
+                  624,
+                  83,
+                  164,
+                  80,
+                  1618,
+                  3
+                ]
+              ]
+            }
+          }
+        ],
+        "mean": {
+          "accuracy": 0.6255136785253024,
+          "precision": 0.40189283308999957,
+          "recall": 0.4969060115501153,
+          "f1": 0.40283757416520155
+        },
+        "std": {
+          "accuracy": 0.0020805500935387675,
+          "precision": 0.002710406601700152,
+          "recall": 0.003495645010780603,
+          "f1": 0.002527510864777837
+        }
+      },
+      "gpt-4o (archived base)": {
+        "runs": [
+          {
+            "count": 5678,
+            "errors": 0,
+            "accuracy": 0.6696019725255372,
+            "macro": {
+              "precision": 0.40702307115298336,
+              "recall": 0.4738153219949765,
+              "f1": 0.4154828875421839
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7330637007077856,
+                "recall": 0.774986638161411,
+                "f1": 0.7534424525850869,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.23178807947019867,
+                "recall": 0.11864406779661017,
+                "f1": 0.15695067264573992,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.1322314049586777,
+                "recall": 0.42424242424242425,
+                "f1": 0.20162016201620162,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.34210526315789475,
+                "recall": 0.5977011494252874,
+                "f1": 0.4351464435146444,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.1,
+                "recall": 0.18181818181818182,
+                "f1": 0.12903225806451613,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9029499786233434,
+                "recall": 0.7454994705259442,
+                "f1": 0.8167053364269142,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1450,
+                  74,
+                  263,
+                  5,
+                  11,
+                  68,
+                  0
+                ],
+                [
+                  252,
+                  70,
+                  164,
+                  2,
+                  10,
+                  92,
+                  0
+                ],
+                [
+                  83,
+                  19,
+                  112,
+                  4,
+                  2,
+                  44,
+                  0
+                ],
+                [
+                  3,
+                  2,
+                  4,
+                  52,
+                  12,
+                  14,
+                  0
+                ],
+                [
+                  1,
+                  1,
+                  6,
+                  10,
+                  6,
+                  9,
+                  0
+                ],
+                [
+                  189,
+                  136,
+                  298,
+                  79,
+                  19,
+                  2112,
+                  0
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 0,
+            "accuracy": 0.6696019725255372,
+            "macro": {
+              "precision": 0.4094280118365916,
+              "recall": 0.47516688151220626,
+              "f1": 0.4186834384370592
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7332657200811359,
+                "recall": 0.7728487439871726,
+                "f1": 0.7525370804059328,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.22697368421052633,
+                "recall": 0.11694915254237288,
+                "f1": 0.15436241610738255,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.12320574162679426,
+                "recall": 0.39015151515151514,
+                "f1": 0.1872727272727273,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.35333333333333333,
+                "recall": 0.6091954022988506,
+                "f1": 0.44725738396624476,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.11864406779661017,
+                "recall": 0.21212121212121213,
+                "f1": 0.15217391304347827,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9011455239711498,
+                "recall": 0.7497352629721143,
+                "f1": 0.8184971098265895,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1446,
+                  81,
+                  260,
+                  5,
+                  11,
+                  68,
+                  0
+                ],
+                [
+                  255,
+                  69,
+                  162,
+                  1,
+                  7,
+                  96,
+                  0
+                ],
+                [
+                  89,
+                  20,
+                  103,
+                  6,
+                  1,
+                  45,
+                  0
+                ],
+                [
+                  3,
+                  2,
+                  4,
+                  53,
+                  9,
+                  16,
+                  0
+                ],
+                [
+                  1,
+                  1,
+                  6,
+                  10,
+                  7,
+                  8,
+                  0
+                ],
+                [
+                  178,
+                  131,
+                  301,
+                  75,
+                  24,
+                  2124,
+                  0
+                ]
+              ]
+            }
+          },
+          {
+            "count": 5678,
+            "errors": 0,
+            "accuracy": 0.6680169073617471,
+            "macro": {
+              "precision": 0.4088880774984148,
+              "recall": 0.47533566212778694,
+              "f1": 0.4184625719775499
+            },
+            "per_label": {
+              "Fully supported": {
+                "precision": 0.7305358948432761,
+                "recall": 0.772314270443613,
+                "f1": 0.7508443751623799,
+                "support": 1871
+              },
+              "Inferentially supported": {
+                "precision": 0.2392638036809816,
+                "recall": 0.13220338983050847,
+                "f1": 0.1703056768558952,
+                "support": 590
+              },
+              "Partially supported": {
+                "precision": 0.12667478684531058,
+                "recall": 0.3939393939393939,
+                "f1": 0.19170506912442395,
+                "support": 264
+              },
+              "Fully refuted": {
+                "precision": 0.3466666666666667,
+                "recall": 0.5977011494252874,
+                "f1": 0.4388185654008439,
+                "support": 87
+              },
+              "Inferentially refuted": {
+                "precision": 0.109375,
+                "recall": 0.21212121212121213,
+                "f1": 0.14432989690721648,
+                "support": 33
+              },
+              "Not enough information": {
+                "precision": 0.9008123129542539,
+                "recall": 0.7437345570067067,
+                "f1": 0.8147718484145398,
+                "support": 2833
+              }
+            },
+            "confusion": {
+              "rows": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information"
+              ],
+              "columns": [
+                "Fully supported",
+                "Inferentially supported",
+                "Partially supported",
+                "Fully refuted",
+                "Inferentially refuted",
+                "Not enough information",
+                "Error"
+              ],
+              "counts": [
+                [
+                  1445,
+                  86,
+                  255,
+                  5,
+                  11,
+                  69,
+                  0
+                ],
+                [
+                  252,
+                  78,
+                  156,
+                  2,
+                  7,
+                  95,
+                  0
+                ],
+                [
+                  90,
+                  19,
+                  104,
+                  3,
+                  4,
+                  44,
+                  0
+                ],
+                [
+                  3,
+                  2,
+                  4,
+                  52,
+                  10,
+                  16,
+                  0
+                ],
+                [
+                  1,
+                  1,
+                  6,
+                  10,
+                  7,
+                  8,
+                  0
+                ],
+                [
+                  187,
+                  140,
+                  296,
+                  78,
+                  25,
+                  2107,
+                  0
+                ]
+              ]
+            }
+          }
+        ],
+        "mean": {
+          "accuracy": 0.6690736174709405,
+          "precision": 0.40844638682932993,
+          "recall": 0.47477262187832325,
+          "f1": 0.41754296598559765
+        },
+        "std": {
+          "accuracy": 0.0007472068839590252,
+          "precision": 0.00103029216189261,
+          "recall": 0.0006804111619899151,
+          "f1": 0.0014594834458345465
+        }
+      }
+    },
+    "metric_parity": "All nine scored runs match scikit-learn within 1e-12."
+  }
+}

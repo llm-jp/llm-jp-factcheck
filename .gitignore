@@ -25,6 +25,9 @@ htmlcov/
 .vscode/
 .DS_Store
 
+# Research input
+data/
+
 # Generated research output
 figure/
 result/

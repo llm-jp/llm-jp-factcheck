@@ -216,15 +216,19 @@ Verification uses the **base prompt with a short rationale added**, derived from
 
 See the completed [guideline/zero-shot evaluation](evaluations/decomposition_guideline_zero_shot.md) and [guideline/8-shot comparison](evaluations/decomposition_guideline_8shot.md) for five-run AIO test results with `gpt-5.4-2026-03-05`.
 
+With the same guideline + 8-shot prompt, **gpt-oss-120b** achieves exact precision/recall/F1 of **0.1779 / 0.1600 / 0.1660** and fuzzy precision/recall/F1 of **0.5428 / 0.4752 / 0.4984**, averaged over five runs. Compared with GPT-5.4, exact F1 decreases by **0.0808** and fuzzy F1 by **0.0583**. All 1,050 document predictions were completed, and all 2,100 document/metric comparisons match the original evaluator. The JSON-to-YAML migration preserves the prompt text exactly. See the [GPT-OSS decomposition report](evaluations/decomposition_gpt_oss_120b.md) and [machine-readable results](evaluations/decomposition_gpt_oss_120b.json) for run variation and comparison conditions.
+
 The evaluation follows §6.2 of [Masano et al. (LREC 2026)](https://aclanthology.org/2026.lrec-1.186/): exact string matching and fuzzy matching with content-word Jaccard similarity. A maximum-weight one-to-one assignment matches predicted and gold claims before applying the threshold. Fuzzy matches use `similarity >= 0.8`, following the reference code. MeCab with UniDic-lite extracts nouns, verbs, adjectives, and adverbs using the reference evaluator's field 10, with surface-form fallback. Precision, recall, and F1 are calculated per generated text and macro-averaged separately. The reported result averages five independent prediction runs.
 
-Install the optional evaluation dependencies and evaluate the default **guideline + 8-shot** prompt:
+Install the optional evaluation dependencies and evaluate the default **guideline + 8-shot** prompt on a configured GPT-OSS deployment:
 
 ```bash
 uv sync --locked --group evaluation
 uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
-  --output result/decomposition-guideline-8shot
+  --model gpt-oss-120b \
+  --max-concurrency 8 \
+  --output result/decomposition-gpt-oss-120b
 ```
 
 The runner reads the pinned experiment revision directly from the dataset repository using `git show`; it does not change that repository's checkout. It uses the original AIO test split (210 texts, 1,169 gold claims), including non-check-worthy claims. It neither filters claims nor passes gold claims or the dataset's questions to the model. Only the generated text is decomposed, matching the reference experiment. The CBA test split is absent from this experiment revision and is not recreated or substituted with the verification dataset's split.
@@ -254,13 +258,18 @@ These results evaluate the application's configured model and Structured Outputs
 
 The earlier GPT-5.4 evaluation without rationales achieved accuracy **0.6279**, macro precision **0.3990**, macro recall **0.4857**, and macro F1 **0.4000**, averaged over three runs. Its [evaluation report](evaluations/verification_base.md) and [machine-readable scores](evaluations/verification_base.json) are retained as the baseline. The command below evaluates the current prompt with short rationales; only verdict labels are scored, and the explanations are saved alongside them.
 
-With short rationales, the three-run means are accuracy **0.6256**, macro precision **0.4019**, macro recall **0.4968**, and macro F1 **0.4028**. Compared with the baseline, macro F1 increases by **0.0028** and accuracy decreases by **0.0023**. All successful rationales were within the requested 40-word limit. See the [rationale evaluation report](evaluations/verification_rationale.md) and [machine-readable comparison](evaluations/verification_rationale.json) for per-label changes, run variation, and failures. These are descriptive differences, not a claim of statistical significance.
+For GPT-5.4 with short rationales, the three-run means are accuracy **0.6256**, macro precision **0.4019**, macro recall **0.4968**, and macro F1 **0.4028**. Compared with the baseline, macro F1 increases by **0.0028** and accuracy decreases by **0.0023**. All successful rationales were within the requested 40-word limit. See the [rationale evaluation report](evaluations/verification_rationale.md) and [machine-readable comparison](evaluations/verification_rationale.json) for per-label changes, run variation, and failures. These are descriptive differences, not a claim of statistical significance.
+
+With the same short-rationale prompt, **gpt-oss-120b** achieves accuracy **0.6537**, macro precision **0.4069**, macro recall **0.4803**, and macro F1 **0.4169** over three runs. One failed prediction out of 17,046 scheduled classifications is retained as incorrect. On 5,678 identical pairs shared with the archived GPT-4o results, macro F1 is **0.4169** for GPT-OSS, **0.4175** for GPT-4o, and **0.4028** for GPT-5.4. GPT-4o uses the label-only base setting; the serving environments also differ. See the [GPT-OSS evaluation report](evaluations/verification_gpt_oss_120b.md) and [machine-readable results](evaluations/verification_gpt_oss_120b.json) for the comparison conditions, per-label metrics, and rationale lengths.
+
+To evaluate the current prompt on a configured GPT-OSS deployment:
 
 ```bash
 uv run --locked --group evaluation python scripts/evaluate_verification.py \
   --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
-  --model gpt-5.4-2026-03-05 \
-  --output result/verification-rationale
+  --model gpt-oss-120b \
+  --max-concurrency 32 \
+  --output result/verification-gpt-oss-120b
 ```
 
 The protocol follows the paper's three-run AIO test evaluation. From 6,824 test pairs, 1,142 pairs whose evidence is the original LLM input question are excluded, leaving 5,682 pairs. Exclusion compares evidence with the corresponding question after trimming outer whitespace. Gold labels use the six paper categories; `完全矛盾` and `推定矛盾` are normalized to the matching refutation categories. There is no new decomposition, claim selection, or retrieval during this evaluation.
