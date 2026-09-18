@@ -212,6 +212,20 @@ The default decomposition prompt uses **guideline + 8-shot**, based on the rule/
 
 Verification uses the **base prompt with a short rationale added**, derived from `feat/verdict_prediction` and [Masano et al. (ACL SRW 2026)](https://aclanthology.org/2026.acl-srw.99/). Its Japanese task and label definitions are retained; the output uses Structured Outputs with `label` followed by `rationale`. The source revision and paths are recorded in [evaluations/verification_source.json](evaluations/verification_source.json). Edit `prompts/verification.yaml` to change these instructions.
 
+## Fact-check generated answers in bulk
+
+Run decomposition, check-worthiness, evidence retrieval, and verification on answer JSONL containing `qid`, `question`, `response`, `model`, and `finish_reason` (`stop`):
+
+```bash
+uv run --locked python scripts/factcheck_answers.py \
+  --input result/your-generation/responses.jsonl \
+  --output result/your-factcheck
+```
+
+The runner uses `FACTCHECKER_*`, `TOKENIZER_NAME`, `ES_HOST`, and `ES_DUMP_INDEX` from the environment or `.env`, the application's default prompts, one evidence passage per check-worthy claim, and up to eight concurrent requests. Override these with `--model`, `--tokenizer-name`, `--es-host`, `--es-index`, `--num-evidences`, and `--max-concurrency`. The original question supplies conversation context for decomposition; reference answers are never used. Sampling uses provider defaults, matching the fact-checking functions.
+
+Every completed operation is checkpointed under `documents/`. Rerunning the same command skips completed decomposition, check-worthiness, retrieval, and verification operations. `--limit N` processes an initial subset; omit it later to continue the full input. `protocol.json` and `prompts/` record the input hash, model, retrieval settings, implementations, and prompt snapshots. `summary.json` reports progress and verdict counts; `results.jsonl` consolidates all answers and their claim results when the run ends. Non-check-worthy claims and claims with no retrieved evidence are counted separately from model verdicts. Errors are logged in `errors.jsonl`, preserve successful checkpoints, and cause a nonzero exit; rerun to retry missing operations.
+
 ## Evaluate claim decomposition
 
 See the completed [guideline/zero-shot evaluation](evaluations/decomposition_guideline_zero_shot.md) and [guideline/8-shot comparison](evaluations/decomposition_guideline_8shot.md) for five-run AIO test results with `gpt-5.4-2026-03-05`.

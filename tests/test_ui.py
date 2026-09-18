@@ -408,7 +408,7 @@ class ChatUITest(unittest.TestCase):
         summary = next(block.value for block in self.app.markdown if 'aria-label="Verdict summary"' in block.value)
         self.assertIn("Evidence verdicts <strong>6</strong>", summary)
         for label in LABELS:
-            self.assertIn(f"<dt>{label}</dt><dd>1</dd>", summary)
+            self.assertIn(f"<dt>{'<br>'.join(label.rsplit(' ', 1))}</dt><dd>1</dd>", summary)
         blocks = [block.value for block in self.app.markdown]
         self.assertLess(
             blocks.index(summary), next(i for i, block in enumerate(blocks) if 'class="claim-heading"' in block)

@@ -28,8 +28,8 @@ LABELS = {
     "Fully supported": "supported",
     "Inferentially supported": "inferentially-supported",
     "Partially supported": "partially-supported",
-    "Inferentially refuted": "inferentially-refuted",
     "Fully refuted": "refuted",
+    "Inferentially refuted": "inferentially-refuted",
     "Not enough information": "nei",
 }
 
@@ -236,7 +236,7 @@ def _render_summary(run: dict) -> None:
     summary = _summarize_results(run)
     cards = "".join(
         f'<div class="verdict-summary-card {style}" data-verdict="{_text(label)}">'
-        f"<dt>{_text(label)}</dt><dd>{summary['labels'][label]}</dd></div>"
+        f"<dt>{'<br>'.join(_text(label).rsplit(' ', 1))}</dt><dd>{summary['labels'][label]}</dd></div>"
         for label, style in LABELS.items()
     )
     st.markdown(
@@ -423,25 +423,24 @@ def _response_controls(message: dict, index: int, args: argparse.Namespace) -> N
     with st.container(key=f"factcheck_action_{response_id}"):
         _factcheck_button(response_id)
     if run:
-        with st.container(key=f"factcheck_activity_{response_id}"):
-            if run["state"] == "running":
-                st.progress(run["progress"])
-                st.markdown(_progress_message(run["message"]), unsafe_allow_html=True)
-            elif run["state"] == "complete":
-                # Explicitly clear any progress or error left by an earlier run.
-                st.empty()
-            elif run["state"] == "paused":
-                st.progress(run["progress"])
-                st.caption(
-                    "Fact-check paused. Requests already sent may finish; no new requests will start. Resume to continue."
-                )
-            elif run["state"] == "error":
-                message = FACTCHECK_ERROR_MESSAGE
-                if run.get("claim_states") or run.get("results"):
-                    message += " Available results are shown below."
-                st.error(message)
-            elif run["state"] == "interrupted":
-                st.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
+        if run["state"] != "complete":
+            with st.container(key=f"factcheck_activity_{response_id}"):
+                if run["state"] == "running":
+                    st.progress(run["progress"])
+                    st.markdown(_progress_message(run["message"]), unsafe_allow_html=True)
+                elif run["state"] == "paused":
+                    st.progress(run["progress"])
+                    st.caption(
+                        "Fact-check paused. Requests already sent may finish; no new requests will start. "
+                        "Resume to continue."
+                    )
+                elif run["state"] == "error":
+                    message = FACTCHECK_ERROR_MESSAGE
+                    if run.get("claim_states") or run.get("results"):
+                        message += " Available results are shown below."
+                    st.error(message)
+                elif run["state"] == "interrupted":
+                    st.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
         with st.container(key=f"factcheck_results_{response_id}"):
             _render_results(run)
 

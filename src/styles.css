@@ -137,13 +137,18 @@ h1, .app-header h1 {
 .results-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.55rem 1rem; border-bottom: 1px solid #e4ebf5; padding: 0.25rem 0 1rem; margin-bottom: 0.15rem; }
 .results-heading h3, h3.results-heading { color: #253d61; font-size: 1.05rem !important; font-weight: 680 !important; letter-spacing: -0.025em; margin: 0 !important; padding: 0 !important; }
 .results-count { display: inline-flex; align-items: center; background: #edf3fd; border: 1px solid #dfe9f9; border-radius: 7px; padding: 0.32rem 0.55rem; color: #4f6c99; font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
+.verdict-summary { container: verdict-summary / inline-size; }
 .summary-totals { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; color: var(--muted); font-size: 0.73rem; margin: 0.2rem 0 0.85rem; }
 .summary-totals > span { white-space: nowrap; }
 .summary-totals strong { display: inline-block; min-width: 2ch; margin-left: 0.3rem; color: var(--ink); font-variant-numeric: tabular-nums; }
 .verdict-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin: 0; }
-.verdict-summary-card { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; min-height: 6rem; padding: 0.75rem 0.9rem; border: 1px solid; border-radius: 10px; }
-.verdict-summary-card dt { font-size: 0.74rem; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
-.verdict-summary-card dd { margin: 0.4rem 0 0; font-size: 1.5rem; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.verdict-summary-card { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; min-width: 0; min-height: 3.6rem; padding: 0.35rem 0.9rem; border: 1px solid; border-radius: 10px; }
+.verdict-summary-card dt { min-width: 0; font-size: 0.74rem; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.verdict-summary-card dd { flex-shrink: 0; margin: 0; text-align: right; font-size: 1.25rem; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+@container verdict-summary (min-width: 52rem) {
+  .verdict-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .verdict-summary-card { gap: 0.5rem; padding-inline: 0.65rem; }
+}
 .eyebrow { color: #5b7395; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.055em; }
 .claim-heading { margin: 1.1rem 0 0.1rem; }
 .claim-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
@@ -151,7 +156,7 @@ h1, .app-header h1 {
 .claim-spinner, .progress-spinner { display: inline-block; width: 0.8rem; height: 0.8rem; flex-shrink: 0; border: 2px solid #dce5f2; border-top-color: #4f6c99; border-radius: 50%; animation: claim-spin 0.85s linear infinite; }
 .progress-message { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--muted); font-size: 0.8rem; line-height: 1.6; }
 .progress-spinner { margin-top: 0.24rem; }
-/* Keep result headings in place as progress changes to a completion message. */
+/* Keep result headings steady while progress messages change. */
 [data-testid="stVerticalBlock"][class*="st-key-factcheck_activity_"] { min-height: 4.5rem; }
 [data-testid="stVerticalBlock"][class*="st-key-factcheck_action_"] [data-testid="stButton"] button { min-width: 10.5rem; }
 @keyframes claim-spin { to { transform: rotate(360deg); } }
@@ -197,8 +202,8 @@ h1, .app-header h1 {
   .results-heading h3, h3.results-heading { font-size: 0.97rem !important; }
   .results-count { font-size: 0.65rem; }
   .verdict-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
-  .verdict-summary-card { min-height: 6.3rem; padding: 0.65rem; }
-  .verdict-summary-card dt { min-height: 3em; font-size: 0.7rem; }
+  .verdict-summary-card { min-height: 3.8rem; padding: 0.35rem 0.65rem; }
+  .verdict-summary-card dt { font-size: 0.7rem; }
   .claim-text { font-size: 0.89rem; }
   .rationale, .evidence-source { font-size: 0.82rem; }
   .evidence-passage { padding: 0.8rem; font-size: 0.79rem; }
