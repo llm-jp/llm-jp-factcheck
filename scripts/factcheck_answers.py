@@ -196,7 +196,7 @@ def main() -> None:
     parser.add_argument("--tokenizer-name", default=os.getenv("TOKENIZER_NAME", "").strip() or "llm-jp/llm-jp-3-13b")
     parser.add_argument("--es-host", default=os.getenv("ES_HOST", "").strip() or "http://10.2.73.12:9200")
     parser.add_argument("--es-index", default=os.getenv("ES_DUMP_INDEX", "").strip() or "llm-jp-corpus-v3")
-    parser.add_argument("--num-evidences", type=int, default=1)
+    parser.add_argument("--num-evidences", type=int, default=3)
     parser.add_argument("--max-concurrency", type=int, default=8)
     parser.add_argument("--request-timeout", type=float, default=180)
     parser.add_argument("--limit", type=int, help="Process the first N answers; omit later to resume the rest.")

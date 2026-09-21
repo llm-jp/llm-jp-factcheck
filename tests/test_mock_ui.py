@@ -119,12 +119,20 @@ class MockModeUITest(unittest.TestCase):
             if not result["is_checkworthy"]:
                 self.assertEqual(result["evidences"], [])
                 continue
-            self.assertEqual(len(result["evidences"]), 1)
+            self.assertEqual(len(result["evidences"]), 3)
             for evidence in result["evidences"]:
                 self.assertEqual(evidence["dataset"], "Mock evidence")
                 self.assertNotIn("meta", evidence)
                 labels.add(evidence["verification"]["label"])
         self.assertEqual(labels, LABELS)
+        summaries = [block.value for block in self.app.markdown if 'aria-label="Verdict summary"' in block.value]
+        self.assertTrue(summaries)
+        for summary in summaries:
+            self.assertIn("Claims <strong>7</strong>", summary)
+            self.assertIn("Check-worthy claims <strong>6</strong>", summary)
+            self.assertIn("Verdicts <strong>18</strong>", summary)
+            for label in LABELS:
+                self.assertIn(f"<dt>{'<br>'.join(label.rsplit(' ', 1))}</dt><dd>3</dd>", summary)
         self.assertTrue(any("Not check-worthy" in caption.value for caption in self.app.caption))
 
     def test_initial_mock_page_explains_synthetic_mode_without_credentials(self):

@@ -248,6 +248,20 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(len(results[0]["evidences"]), count)
                 self.assertEqual(self.verify.call_count, count)
 
+    def test_default_retrieves_three_passages_and_keeps_conflicting_pair_verdicts(self):
+        self.decompose.return_value = ["Claim"]
+        self.search.return_value = [self.hit(), self.hit("3 4"), self.hit("5 6")]
+        events = list(run_factcheck("Response", None, PipelineConfig()))
+        self.assertEqual(self.search.call_args.kwargs["size"], 3)
+        self.assertEqual(self.verify.call_count, 3)
+        result = self.results_in_claim_order(events)[0]
+        self.assertEqual(
+            [evidence["verification"]["label"] for evidence in result["evidences"]],
+            ["Fully supported", "Fully refuted", "Fully refuted"],
+        )
+        self.assertNotIn("verification", result)
+        self.assertNotIn("label", result)
+
     def test_long_hit_is_verified_as_one_complete_passage(self):
         self.decompose.return_value = ["Claim"]
         passage = "Complete evidence passage. " * 100

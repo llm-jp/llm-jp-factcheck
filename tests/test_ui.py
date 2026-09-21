@@ -406,7 +406,9 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(len(run["results"][0]["evidences"]), len(LABELS))
         content = self.rendered_text()
         summary = next(block.value for block in self.app.markdown if 'aria-label="Verdict summary"' in block.value)
-        self.assertIn("Evidence verdicts <strong>6</strong>", summary)
+        self.assertIn("Claims <strong>1</strong>", summary)
+        self.assertIn("Check-worthy claims <strong>1</strong>", summary)
+        self.assertIn("Verdicts <strong>6</strong>", summary)
         for label in LABELS:
             self.assertIn(f"<dt>{'<br>'.join(label.rsplit(' ', 1))}</dt><dd>1</dd>", summary)
         blocks = [block.value for block in self.app.markdown]
@@ -880,6 +882,7 @@ class ChatUITest(unittest.TestCase):
         self.assertEqual(args.verification_prompt, "verify.json")
         self.assertEqual(args.chat_engine, "chat-model")
         self.assertEqual(args.max_concurrency, 3)
+        self.assertEqual(args.num_evidences, 3)
         with self.assertRaises(argparse.ArgumentTypeError):
             module.positive_integer("0")
         with self.assertRaises(argparse.ArgumentTypeError):
@@ -1063,16 +1066,31 @@ class ResultSummaryTests(unittest.TestCase):
                 self.assertEqual(summary["labels"]["Fully supported"], 2)
                 self.assertEqual(summary["labels"]["Not enough information"], 1)
                 self.assertEqual(summary["labels"]["Fully refuted"], 0)
-                self.assertEqual(summary["skipped_claims"], 1)
-                self.assertEqual(summary["claims_without_evidence"], 1)
+                self.assertEqual(summary["claims"], 3)
+                self.assertEqual(summary["checkworthy_claims"], 2)
+
+    def test_conflicting_verdicts_are_counted_independently_without_majority_vote(self):
+        module = load_ui_module()
+        result = claim_result(labels=["Fully supported", "Fully refuted", "Fully refuted"])
+        summary = module._summarize_results({"claims": [result["claim"]], "claim_states": [result]})
+        self.assertEqual(summary["claims"], 1)
+        self.assertEqual(summary["checkworthy_claims"], 1)
+        self.assertEqual(summary["verdicts"], 3)
+        self.assertEqual(summary["labels"]["Fully supported"], 1)
+        self.assertEqual(summary["labels"]["Fully refuted"], 2)
+        self.assertEqual(sum(summary["labels"].values()), summary["verdicts"])
 
     def test_summary_handles_initial_and_historical_results(self):
         module = load_ui_module()
         initial = module._summarize_results({"claim_states": [{"claim": "Pending", "evidences": []}]})
         self.assertEqual(initial["verdicts"], 0)
+        self.assertEqual(initial["claims"], 1)
+        self.assertEqual(initial["checkworthy_claims"], 0)
         self.assertEqual(initial["labels"], dict.fromkeys(LABELS, 0))
         historical = module._summarize_results({"results": [claim_result(labels=LABELS)]})
         self.assertEqual(historical["verdicts"], 6)
+        self.assertEqual(historical["claims"], 1)
+        self.assertEqual(historical["checkworthy_claims"], 1)
         self.assertEqual(historical["labels"], dict.fromkeys(LABELS, 1))
 
 

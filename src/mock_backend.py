@@ -35,6 +35,7 @@ _FIXTURES = (
         (
             "Fictional opening record: Northstar Museum first opened to visitors in 2012.",
             "Fictional anniversary note: Northstar Museum celebrated ten years since its 2012 opening in 2022.",
+            "Fictional museum history: Northstar Museum opened its doors in 2012.",
         ),
         "The sample record explicitly confirms that the museum opened in 2012.",
     ),
@@ -44,6 +45,7 @@ _FIXTURES = (
         (
             "Fictional visitor guide: Northstar Museum opens at 9 a.m. The guide does not list a closing time.",
             "Fictional timetable: Northstar Museum opening time is 09:00. Closing time is not recorded.",
+            "Fictional entrance notice: Northstar Museum opens at 9 a.m.; no closing time is given.",
         ),
         "The sample supports the 9 a.m. opening time but leaves the claimed 6 p.m. closing time unresolved.",
     ),
@@ -53,6 +55,7 @@ _FIXTURES = (
         (
             "Fictional facilities list: Northstar Museum has a cafe. It does not have a gift shop.",
             "Fictional floor plan: Northstar Museum includes a cafe; the museum has no gift shop.",
+            "Fictional amenities guide: Northstar Museum offers a cafe but no gift shop.",
         ),
         "The explicit contradiction about the gift shop refutes the claim, even though the cafe is confirmed.",
     ),
@@ -62,6 +65,7 @@ _FIXTURES = (
         (
             "Fictional weekly schedule: Northstar Museum is open every weekday.",
             "Fictional visitor notice: Northstar Museum welcomes visitors on all weekdays.",
+            "Fictional opening calendar: Northstar Museum is open each weekday.",
         ),
         "Knowing that Monday is a weekday, the schedule implies that the museum is open on Mondays.",
     ),
@@ -71,6 +75,7 @@ _FIXTURES = (
         (
             "Fictional access guide: Northstar Museum has bicycle parking beside its entrance.",
             "Fictional visitor guide: Northstar Museum provides lockers for visitors' bags.",
+            "Fictional facilities notice: Northstar Museum has a visitor information desk near the entrance.",
         ),
         "The sample describes visitor facilities and provides no information about the museum's director.",
     ),
@@ -80,6 +85,7 @@ _FIXTURES = (
         (
             "Fictional anniversary notice: Northstar Museum marked its tenth anniversary in 2022.",
             "Fictional celebration record: Northstar Museum celebrated ten years of operation in 2022.",
+            "Fictional event program: Northstar Museum celebrated its tenth anniversary during 2022.",
         ),
         "A tenth anniversary in 2022 implies an opening in 2012, which is before 2015.",
     ),

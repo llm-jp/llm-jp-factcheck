@@ -81,7 +81,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Search index (overrides ES_DUMP_INDEX; default: llm-jp-corpus-v3).",
     )
-    parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=1)
+    parser.add_argument("--num_evidences", "--num-evidences", type=positive_integer, default=3)
     parser.add_argument(
         "--max-concurrency",
         "--max_concurrency",
@@ -210,25 +210,24 @@ def _render_result(result: dict, index: int, *, stopped: bool = False, paused: b
 
 
 def _summarize_results(run: dict) -> dict:
-    """Count completed evidence verdicts from the latest claim snapshots."""
+    """Count claims and completed pair verdicts without aggregating verdicts per claim."""
     counts = dict.fromkeys(LABELS, 0)
-    skipped = without_evidence = 0
-    for result in run.get("claim_states", run.get("results", [])):
+    results = run.get("claim_states", run.get("results", []))
+    checkworthy = sum(result.get("is_checkworthy") is True for result in results)
+    for result in results:
         if result.get("is_checkworthy") is False:
-            skipped += 1
             continue
         if result.get("no_evidence"):
-            without_evidence += 1
             continue
         for evidence in result.get("evidences", []):
             label = (evidence.get("verification") or {}).get("label")
             if label in counts:
                 counts[label] += 1
     return {
+        "claims": len(run.get("claims", results)),
+        "checkworthy_claims": checkworthy,
         "labels": counts,
         "verdicts": sum(counts.values()),
-        "skipped_claims": skipped,
-        "claims_without_evidence": without_evidence,
     }
 
 
@@ -242,9 +241,9 @@ def _render_summary(run: dict) -> None:
     st.markdown(
         '<section class="verdict-summary" aria-label="Verdict summary">'
         '<div class="summary-totals">'
-        f"<span>Evidence verdicts <strong>{summary['verdicts']}</strong></span>"
-        f"<span>Skipped claims <strong>{summary['skipped_claims']}</strong></span>"
-        f"<span>Claims without evidence <strong>{summary['claims_without_evidence']}</strong></span>"
+        f"<span>Claims <strong>{summary['claims']}</strong></span>"
+        f"<span>Check-worthy claims <strong>{summary['checkworthy_claims']}</strong></span>"
+        f"<span>Verdicts <strong>{summary['verdicts']}</strong></span>"
         f'</div><dl class="verdict-summary-grid">{cards}</dl></section>',
         unsafe_allow_html=True,
     )

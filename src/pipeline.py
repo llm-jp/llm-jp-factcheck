@@ -20,7 +20,7 @@ class PipelineConfig:
     tokenizer_name: str = "llm-jp/llm-jp-3-13b"
     es_host: str = "http://localhost:9200"
     es_dump_index: str = "llm-jp-corpus-v3"
-    num_evidences: int = 1
+    num_evidences: int = 3
     max_concurrency: int = 8
     decomposition_prompt: str | None = None
     checkworthiness_prompt: str | None = None

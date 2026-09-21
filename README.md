@@ -63,7 +63,7 @@ CLI arguments take precedence over environment variables, followed by the defaul
 
 Set `TOKENIZER_NAME` or `--tokenizer_name` to the tokenizer used to build the index. The first fact-check downloads the tokenizer from Hugging Face if it is not cached.
 
-Retrieval follows the `v3.0` branch: encode each claim without special tokens, search the `token_ids` field with a match query, and request up to `--num_evidences` hits. Each hit is decoded into a complete evidence passage in Elasticsearch result order, with its source and training step preserved. Passages are not split or reranked locally. Empty passages are skipped.
+Retrieval follows the `v3.0` branch: encode each claim without special tokens, search the `token_ids` field with a match query, and request the top three hits by default. Override the count with `--num_evidences`. Each hit is decoded into a complete evidence passage in Elasticsearch result order, with its source and training step preserved. Passages are not split or reranked locally. Empty passages are skipped.
 
 ## Run
 
@@ -109,7 +109,7 @@ uv run --locked streamlit run src/serve.py -- --mock
 
 Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and three seconds per fact-check with the default evidence count and concurrency, excluding UI overhead. Mock check-worthiness, retrieval, and verification use the same bounded parallel execution as live requests. Adjust the delay constants in `src/mock_backend.py` to change these timings.
 
-Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings. `--num_evidences` selects up to two available synthetic evidence passages per claim, and `--max-concurrency` limits simultaneous mock tasks. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
+Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings. `--num_evidences` selects up to three available synthetic evidence passages per claim (three by default), and `--max-concurrency` limits simultaneous mock tasks. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
 
 ## Workflow
 
@@ -123,7 +123,7 @@ Failures display a short retry message. Technical exception details and tracebac
 
 The first fact-check starts immediately. Checking the same response again opens a confirmation modal: **Run again** replaces its existing results, while **Cancel**, the close button, or Escape keeps them. The progress indicator disappears when the run ends. The **Source** section below the rationale shows the source name. Expand **Evidence passage** to read the passage itself. Training steps are not displayed.
 
-The top of **Fact-check results** summarizes the six verdict counts as results arrive. Counts represent completed claim–evidence pairs, so one claim with multiple passages can contribute several verdicts. Skipped claims and claims without retrieved evidence are counted separately; pending or failed verifications are not counted as verdicts. The summary retains all six labels, including zero counts, while processing continues.
+The top of **Fact-check results** shows **Claims**, **Check-worthy claims**, **Verdicts**, and the distribution across all six verdict labels, including zero counts. Claim counts appear after decomposition, and check-worthy claim counts update as those decisions arrive. Each verdict belongs to one claim–evidence pair; conflicting verdicts remain separate and are never combined by majority vote. With three retrieved passages per check-worthy claim and all verifications complete, the verdict count equals the check-worthy claim count multiplied by three. Only completed verifications count toward verdicts and their distribution, so fewer retrieved passages, pending requests, or failed requests can reduce that total.
 
 During a fact-check, its button changes to **Pause fact-check**. Pausing stops new requests from starting while retaining the current pipeline, progress, and intermediate results. Requests already sent may finish and their responses are retained for resumption. Select **Resume fact-check** to continue without repeating completed requests. The progress bar stays visible while paused; activity icons stop. **New chat** discards paused or running checks and cancels work that has not started.
 
@@ -222,9 +222,53 @@ uv run --locked python scripts/factcheck_answers.py \
   --output result/your-factcheck
 ```
 
-The runner uses `FACTCHECKER_*`, `TOKENIZER_NAME`, `ES_HOST`, and `ES_DUMP_INDEX` from the environment or `.env`, the application's default prompts, one evidence passage per check-worthy claim, and up to eight concurrent requests. Override these with `--model`, `--tokenizer-name`, `--es-host`, `--es-index`, `--num-evidences`, and `--max-concurrency`. The original question supplies conversation context for decomposition; reference answers are never used. Sampling uses provider defaults, matching the fact-checking functions.
+The runner uses `FACTCHECKER_*`, `TOKENIZER_NAME`, `ES_HOST`, and `ES_DUMP_INDEX` from the environment or `.env`, the application's default prompts, up to three evidence passages per check-worthy claim, and up to eight concurrent requests. Override these with `--model`, `--tokenizer-name`, `--es-host`, `--es-index`, `--num-evidences`, and `--max-concurrency`. The original question supplies conversation context for decomposition; reference answers are never used. Sampling uses provider defaults, matching the fact-checking functions.
 
 Every completed operation is checkpointed under `documents/`. Rerunning the same command skips completed decomposition, check-worthiness, retrieval, and verification operations. `--limit N` processes an initial subset; omit it later to continue the full input. `protocol.json` and `prompts/` record the input hash, model, retrieval settings, implementations, and prompt snapshots. `summary.json` reports progress and verdict counts; `results.jsonl` consolidates all answers and their claim results when the run ends. Non-check-worthy claims and claims with no retrieved evidence are counted separately from model verdicts. Errors are logged in `errors.jsonl`, preserve successful checkpoints, and cause a nonzero exit; rerun to retry missing operations.
+
+For the AIO top-3 run, reuse completed decomposition and check-worthiness in a **new** output directory, then retrieve the top three hits and verify each claim–evidence pair independently:
+
+```bash
+uv run --locked python scripts/prepare_factcheck_expansion.py \
+  --source result/aio_02_dev_v1.0_factcheck_gpt-oss-120b \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3 \
+  --num-evidences 3
+uv run --locked python scripts/factcheck_answers.py \
+  --input result/aio_02_dev_v1.0_llm-jp-3-13b-instruct2_temperature1.0_top-p1.0/responses.jsonl \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3 \
+  --num-evidences 3
+```
+
+Preparation runs once and refuses to overwrite an existing directory; resume with the second command. It preserves claim order and text but removes old retrieval and verification results, so all newly retrieved passages receive fresh verdicts. Each item in `claims[].evidences[]` keeps its retrieval `rank` and its own `verification.label` and `verification.rationale`; passages are neither concatenated nor reduced to an aggregate verdict. `reuse_provenance.json` records the original input and reused stages. Elasticsearch must be reachable (for this workspace, through the temporary SSH tunnel).
+
+## Select final-answer claims and compare with reference answers
+
+Use `gpt-oss-120b` through the `FACTCHECKER_*` connection to select one existing claim per answer, then independently compare that claim with the dataset's accepted answers:
+
+```bash
+uv run --locked python scripts/evaluate_final_answer_claims.py \
+  --input result/aio_02_dev_v1.0_factcheck_gpt-oss-120b/results.jsonl \
+  --gold data/aio_02_dev_v1.0.jsonl \
+  --output result/aio_02_dev_v1.0_final_answer_claims_gpt-oss-120b
+```
+
+Selection sees only the question, generated response, and indexed existing claims, including non-check-worthy claims. It never sees reference answers or evidence verdicts. The second model request sees the question, selected claim, and `answers` aliases; it labels semantic agreement as `match`, `mismatch`, or `undetermined`. When no existing claim corresponds to the final answer, selection returns `no_matching_claim` and the second request records `no_claim`, without inventing a claim or grading an absent claim as incorrect. Both stages use provider sampling defaults.
+
+Each result records the original claim index and text, model rationales, response metadata, and correctness label. `documents/` saves every successful stage; rerunning the same command skips saved work. Use `--limit N` for an initial subset and omit it to resume all questions. `protocol.json` and `prompts/` freeze inputs, implementation hashes, and prompts. `summary.json` reports progress and label counts; `results.jsonl` consolidates results when the run ends. The match rate over all questions and the match rate over decided claims have separate denominators; neither treats `undetermined` or `no_claim` as a model judgment of incorrectness.
+
+## Compare answer correctness with evidence verification
+
+The [AIO02 matrix and qualitative analysis](evaluations/aio_02_answer_verification_matrix.md) pairs each final-answer correctness result with the verification verdict for the exact same selected claim. It includes all 1,000 questions and reviews up to 20 randomly sampled examples per nonempty cell (274 examples, seed 20260920). Unchecked claims and missing selections remain separate from the six verification labels.
+
+```bash
+uv run --locked python scripts/analyze_answer_verification_matrix.py \
+  --answers result/aio_02_dev_v1.0_final_answer_claims_gpt-oss-120b/results.jsonl \
+  --factchecks result/aio_02_dev_v1.0_factcheck_gpt-oss-120b/results.jsonl \
+  --output result/aio_02_dev_v1.0_answer_verification_analysis \
+  --seed 20260920 --sample-size 20 --review
+```
+
+Omit `--review` to generate the matrix and reproducible samples without API requests. Reviews use `gpt-oss-120b` through `FACTCHECKER_*`, retain original labels, and checkpoint each case. The report distinguishes model-assisted observations from annotations made while checking the source text; neither constitutes a corrected human gold dataset.
 
 ## Evaluate claim decomposition
 

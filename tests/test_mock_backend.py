@@ -67,7 +67,7 @@ class MockBackendTests(unittest.TestCase):
         self.results("\n".join(mock_backend.MOCK_CLAIMS), count=100)
         factcheck_delay = sum(call.args[0] for call in self.sleep.call_args_list)
         self.assertGreaterEqual(factcheck_delay, 8)
-        self.assertLess(factcheck_delay, 17)
+        self.assertLess(factcheck_delay, 21)
 
     def test_each_claim_has_its_own_coherent_six_label_fixture(self):
         results = self.results(self.response())
@@ -113,7 +113,7 @@ class MockBackendTests(unittest.TestCase):
 
     def test_evidence_limit_uses_only_two_finite_variants(self):
         document = "\n".join(mock_backend.MOCK_CLAIMS)
-        for requested, expected in [(1, 1), (2, 2), (20, 2)]:
+        for requested, expected in [(1, 1), (2, 2), (3, 3), (20, 3)]:
             with self.subTest(requested=requested):
                 for result in self.results(document, count=requested):
                     if not result["is_checkworthy"]:
