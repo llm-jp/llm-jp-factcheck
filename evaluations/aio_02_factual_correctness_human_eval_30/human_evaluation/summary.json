@@ -1,0 +1,118 @@
+{
+  "created_at": "2026-09-23T02:59:19.163694+00:00",
+  "reference_standard": "User's human annotations; no adjudication or relabeling.",
+  "n": 30,
+  "agreements": 29,
+  "disagreements": 1,
+  "accuracy_against_human": 0.9666666666666667,
+  "wilson_95_ci_binomial_approximation": [
+    0.8332960900859084,
+    0.9940914096183876
+  ],
+  "cohen_kappa": 0.9295774647887324,
+  "human_counts": {
+    "match": 18,
+    "mismatch": 12
+  },
+  "automatic_counts": {
+    "match": 19,
+    "mismatch": 11
+  },
+  "matrix_rows_human_columns_automatic": {
+    "match": {
+      "match": 18,
+      "mismatch": 0,
+      "undetermined": 0
+    },
+    "mismatch": {
+      "match": 1,
+      "mismatch": 11,
+      "undetermined": 0
+    },
+    "undetermined": {
+      "match": 0,
+      "mismatch": 0,
+      "undetermined": 0
+    }
+  },
+  "label_normalization": {
+    "unmatch": "mismatch"
+  },
+  "normalizations": [
+    {
+      "qid": "AIO02-0033",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0214",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0258",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0388",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0507",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0544",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0610",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0689",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0718",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0824",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0844",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    },
+    {
+      "qid": "AIO02-0962",
+      "raw": "unmatch",
+      "normalized": "mismatch"
+    }
+  ],
+  "disagreement_qids": [
+    "AIO02-0610"
+  ],
+  "sampling_population": 977,
+  "sampling_seed": 20260923,
+  "non_annotation_fields_unchanged": true,
+  "human_rationales_provided": 0,
+  "selection_issue_notes_provided": 0,
+  "source_sha256": {
+    "cases.csv": "66c5c4b50c252b11305cad7d681fcfbaf631576671e8e8617cb697f1468f10e4",
+    "cases.jsonl": "a9fb91047f17a3885442e0788533cf3139a6535b4a8801cf54be342e7710c5b3",
+    "model_judgments.csv": "ae7a473e783204b2c088b564567a159c4c8d9ee6c2af08feb415e3ec9f99d0f0",
+    "manifest.json": "98e7e26341b423308a742f22bdad371c52cf67c6586cce180e620a50de190c70"
+  },
+  "script_sha256": "e55b45eee6ad31b18eba28fb3571b8c1065f1132cd0abb7ea8858717658c6d3e"
+}

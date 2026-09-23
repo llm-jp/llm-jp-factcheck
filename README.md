@@ -241,6 +241,16 @@ uv run --locked python scripts/factcheck_answers.py \
 
 Preparation runs once and refuses to overwrite an existing directory; resume with the second command. It preserves claim order and text but removes old retrieval and verification results, so all newly retrieved passages receive fresh verdicts. Each item in `claims[].evidences[]` keeps its retrieval `rank` and its own `verification.label` and `verification.rationale`; passages are neither concatenated nor reduced to an aggregate verdict. `reuse_provenance.json` records the original input and reused stages. Elasticsearch must be reachable (for this workspace, through the temporary SSH tunnel).
 
+To aggregate the completed top-three passage verdicts into one label per check-worthy claim:
+
+```bash
+uv run --locked python scripts/aggregate_claim_verdicts.py \
+  --input result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3/results.jsonl \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3/claim_aggregation
+```
+
+`Fully supported`, `Inferentially supported`, and `Partially supported` count as support; `Fully refuted` and `Inferentially refuted` count as refutation. Any support yields `Supported`, otherwise any refutation yields `Refuted`, otherwise the label is `Insufficient evidence`. Support takes priority when passages disagree. This is a local post-processing step with no API calls. It requires three completed verdicts per check-worthy claim, retains question IDs, claim indices, and passage labels in `claims.jsonl`, and saves counts in `summary.json`, `summary.csv`, and `summary.md`. Non-check-worthy claims retain a null aggregate label and are excluded from the label counts and percentage denominator. `protocol.json` records the mapping and source/implementation hashes.
+
 ## Select final-answer claims and compare with reference answers
 
 Use `gpt-oss-120b` through the `FACTCHECKER_*` connection to select one existing claim per answer, then independently compare that claim with the dataset's accepted answers:
