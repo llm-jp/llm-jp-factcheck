@@ -132,7 +132,8 @@ class MockModeUITest(unittest.TestCase):
             self.assertIn("Check-worthy claims <strong>6</strong>", summary)
             self.assertIn("Verdicts <strong>18</strong>", summary)
             for label in LABELS:
-                self.assertIn(f"<dt>{'<br>'.join(label.rsplit(' ', 1))}</dt><dd>3</dd>", summary)
+                first, last = label.rsplit(" ", 1)
+                self.assertIn(f"*{first}  \n{last}* **3**", [button.label for button in self.app.button])
         self.assertTrue(any("Not check-worthy" in caption.value for caption in self.app.caption))
 
     def test_initial_mock_page_explains_synthetic_mode_without_credentials(self):

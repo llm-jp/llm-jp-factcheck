@@ -137,7 +137,9 @@ def _progress_message(message: str) -> str:
     )
 
 
-def _render_result(result: dict, index: int, *, stopped: bool = False, paused: bool = False) -> None:
+def _render_result(
+    result: dict, index: int, *, stopped: bool = False, paused: bool = False, verdict_filter: str | None = None
+) -> None:
     processing = (
         not stopped
         and not paused
@@ -178,6 +180,8 @@ def _render_result(result: dict, index: int, *, stopped: bool = False, paused: b
 
     for evidence_index, evidence in enumerate(result["evidences"], 1):
         verification = evidence.get("verification")
+        if verdict_filter and (verification or {}).get("label") != verdict_filter:
+            continue
         with st.container(border=True):
             st.markdown(f'<div class="eyebrow evidence-number">Evidence {evidence_index}</div>', unsafe_allow_html=True)
             with st.container():
@@ -231,25 +235,45 @@ def _summarize_results(run: dict) -> dict:
     }
 
 
-def _render_summary(run: dict) -> None:
+def _toggle_verdict_filter(response_id: str, label: str | None) -> None:
+    run = st.session_state["factchecks"][response_id]
+    run["verdict_filter"] = None if run.get("verdict_filter") == label else label
+
+
+def _render_summary(run: dict, response_id: str) -> None:
     summary = _summarize_results(run)
-    cards = "".join(
-        f'<div class="verdict-summary-card {style}" data-verdict="{_text(label)}">'
-        f"<dt>{'<br>'.join(_text(label).rsplit(' ', 1))}</dt><dd>{summary['labels'][label]}</dd></div>"
-        for label, style in LABELS.items()
-    )
     st.markdown(
         '<section class="verdict-summary" aria-label="Verdict summary">'
         '<div class="summary-totals">'
         f"<span>Claims <strong>{summary['claims']}</strong></span>"
         f"<span>Check-worthy claims <strong>{summary['checkworthy_claims']}</strong></span>"
         f"<span>Verdicts <strong>{summary['verdicts']}</strong></span>"
-        f'</div><dl class="verdict-summary-grid">{cards}</dl></section>',
+        "</div></section>",
         unsafe_allow_html=True,
     )
+    with st.container(key=f"verdict_summary_{response_id}"):
+        with st.container(key=f"verdict_grid_{response_id}"):
+            for label, style in LABELS.items():
+                first, last = label.rsplit(" ", 1)
+                st.button(
+                    f"*{first}  \n{last}* **{summary['labels'][label]}**",
+                    key=f"verdict_filter_{style}_{response_id}",
+                    type="primary" if run.get("verdict_filter") == label else "secondary",
+                    use_container_width=True,
+                    on_click=_toggle_verdict_filter,
+                    args=(response_id, label),
+                )
+    if run.get("verdict_filter"):
+        st.caption(f"Showing: {run['verdict_filter']}")
+        st.button(
+            "Show all verdicts",
+            key=f"clear_verdict_filter_{response_id}",
+            on_click=_toggle_verdict_filter,
+            args=(response_id, None),
+        )
 
 
-def _render_results(run: dict) -> None:
+def _render_results(run: dict, response_id: str) -> None:
     claims = run.get("claims", [])
     results = run.get("results", [])
     if not claims and not results:
@@ -263,19 +287,34 @@ def _render_results(run: dict) -> None:
             f'<span class="results-count">{len(results)} / {len(claims)} claims processed</span></div>',
             unsafe_allow_html=True,
         )
-        _render_summary(run)
+        _render_summary(run, response_id)
         if run.get("mock"):
             st.caption("Synthetic results for interface testing.")
         # Keep every claim in its original position while individual results arrive.
         with st.container():
+            verdict_filter = run.get("verdict_filter")
+            visible_claims = 0
             for index, result in enumerate(run.get("claim_states", results), 1):
+                if verdict_filter and (
+                    result.get("is_checkworthy") is False
+                    or result.get("no_evidence")
+                    or not any(
+                        (evidence.get("verification") or {}).get("label") == verdict_filter
+                        for evidence in result.get("evidences", [])
+                    )
+                ):
+                    continue
+                visible_claims += 1
                 with st.container():
                     _render_result(
                         result,
                         index,
                         stopped=run.get("state") in {"error", "interrupted"},
                         paused=run.get("state") == "paused",
+                        verdict_filter=verdict_filter,
                     )
+            if verdict_filter and not visible_claims:
+                st.info("No completed verdicts match this label.")
 
 
 def _progress(event) -> float:
@@ -441,7 +480,7 @@ def _response_controls(message: dict, index: int, args: argparse.Namespace) -> N
                 elif run["state"] == "interrupted":
                     st.warning("This fact-check was interrupted. Available results are shown below. You can retry.")
         with st.container(key=f"factcheck_results_{response_id}"):
-            _render_results(run)
+            _render_results(run, response_id)
 
 
 def _factcheck_button(response_id: str) -> None:

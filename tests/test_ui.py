@@ -410,7 +410,8 @@ class ChatUITest(unittest.TestCase):
         self.assertIn("Check-worthy claims <strong>1</strong>", summary)
         self.assertIn("Verdicts <strong>6</strong>", summary)
         for label in LABELS:
-            self.assertIn(f"<dt>{'<br>'.join(label.rsplit(' ', 1))}</dt><dd>1</dd>", summary)
+            first, last = label.rsplit(" ", 1)
+            self.assertIn(f"*{first}  \n{last}* **1**", [button.label for button in self.app.button])
         blocks = [block.value for block in self.app.markdown]
         self.assertLess(
             blocks.index(summary), next(i for i, block in enumerate(blocks) if 'class="claim-heading"' in block)
@@ -441,6 +442,84 @@ class ChatUITest(unittest.TestCase):
         self.assertTrue(all(not passage.proto.expanded for passage in passages))
         self.assert_no_supplementary_sections()
         self.assert_processing_finished()
+
+    def test_verdict_cards_filter_pairs_toggle_and_clear_without_rerunning_checks(self):
+        self.send("Tell me about Japan.")
+        response_id = self.assistants()[0]["id"]
+        run = self.check(response_id, claim_result(labels=["Fully supported", "Fully refuted", "Fully supported"]))
+        saved_results = deepcopy(run["results"])
+        key = f"verdict_filter_refuted_{response_id}"
+        self.app.button(key=key).click().run()
+        self.assert_app_ok()
+        self.assertEqual(run["verdict_filter"], "Fully refuted")
+        self.assertEqual(len(self.app.expander), 1)
+        self.assertIn('evidence-number">Evidence 2', self.rendered_text())
+        self.assertNotIn('evidence-number">Evidence 1', self.rendered_text())
+        self.assertIn("Verdicts <strong>3</strong>", self.rendered_text())
+        self.assertEqual(self.app.button(key=key).proto.type, "primary")
+        self.assertEqual(run["results"], saved_results)
+
+        self.app.button(key=key).click().run()
+        self.assert_app_ok()
+        self.assertIsNone(run["verdict_filter"])
+        self.assertEqual(len(self.app.expander), 3)
+
+        self.app.button(key=f"verdict_filter_nei_{response_id}").click().run()
+        self.assert_app_ok()
+        self.assertEqual(len(self.app.expander), 0)
+        self.assertTrue(any("No completed verdicts match" in info.value for info in self.app.info))
+        self.app.button(key=f"clear_verdict_filter_{response_id}").click().run()
+        self.assert_app_ok()
+        self.assertEqual(len(self.app.expander), 3)
+        self.pipeline.run_factcheck.assert_called_once()
+        self.chat.stream_chat_response.assert_called_once()
+
+    def test_filters_are_independent_for_each_response_and_reset_on_recheck(self):
+        self.send("First question", "First response")
+        first = self.assistants()[0]["id"]
+        self.check(first, claim_result("First claim", ["Fully supported", "Fully refuted"]))
+        self.app.button(key=f"verdict_filter_refuted_{first}").click().run()
+        self.send("Second question", "Second response")
+        second = self.assistants()[1]["id"]
+        self.check(second, claim_result("Second claim", ["Fully supported", "Fully refuted"]))
+        self.app.button(key=f"verdict_filter_supported_{second}").click().run()
+        self.assert_app_ok()
+        checks = self.app.session_state["factchecks"]
+        self.assertEqual(checks[first]["verdict_filter"], "Fully refuted")
+        self.assertEqual(checks[second]["verdict_filter"], "Fully supported")
+        self.assertEqual(len(self.app.expander), 2)
+        self.assertEqual(self.pipeline.run_factcheck.call_count, 2)
+        self.check(first)
+        self.pipeline.run_factcheck.return_value = completed_events(claim_result("Rechecked first claim"))
+        self.app.button(key=f"confirm_factcheck_{first}").click().run()
+        self.assert_app_ok()
+        self.assertIsNone(checks[first].get("verdict_filter"))
+        self.assertEqual(checks[second]["verdict_filter"], "Fully supported")
+
+    def test_filter_excludes_unverified_claims_and_keeps_original_claim_numbers(self):
+        self.send("Tell me about Japan.")
+        response_id = self.assistants()[0]["id"]
+        run = self.check(response_id, claim_result(labels=["Fully supported", "Not enough information"]))
+        run["claim_states"] = [
+            {"claim": "Skipped", "is_checkworthy": False, "evidences": []},
+            {"claim": "Missing", "is_checkworthy": True, "no_evidence": True, "evidences": []},
+            run["results"][0],
+            {"claim": "Pending", "is_checkworthy": True, "evidences": [{"passage": "Pending"}]},
+        ]
+        run["claims"] = [result["claim"] for result in run["claim_states"]]
+        self.app.button(key=f"verdict_filter_nei_{response_id}").click().run()
+        self.assert_app_ok()
+        text = self.rendered_text()
+        self.assertIn('class="eyebrow">Claim 3', text)
+        self.assertNotIn('class="eyebrow">Claim 1', text)
+        self.assertNotIn('class="eyebrow">Claim 2', text)
+        self.assertNotIn('class="eyebrow">Claim 4', text)
+        self.assertIn('evidence-number">Evidence 2', text)
+        self.assertEqual(len(self.app.expander), 1)
+        self.assertIn("Claims <strong>4</strong>", text)
+        self.assertIn("Check-worthy claims <strong>3</strong>", text)
+        self.assertIn("Verdicts <strong>2</strong>", text)
+        self.pipeline.run_factcheck.assert_called_once()
 
     def test_base_verdict_without_rationale_renders_without_an_empty_section(self):
         self.send("Tell me about Japan.")
