@@ -1,110 +1,56 @@
-import json
-from logging import getLogger
-from textwrap import dedent
+"""Identify claims worth checking using an editable prompting template."""
 
-from utils import client
+from __future__ import annotations
 
-logger = getLogger(__name__)
+from pathlib import Path
 
-SYSTEM_PROMPT = dedent(
-    """\
-    You are provided with claims.
-    Your task is to determine whether each claim should be fact-checked.
-    For example, subjective claims, trivial facts, and questions are not check-worthy.
+from clients import get_client
+from prompts import PROMPT_DIR, render_prompt
+from utils import parse_json_response
 
-    Example:
-        Input:
-            Claims:
-                - Friends is a great TV series.
-                - The Stanford Prison Experiment was conducted in the basement of Encina Hall.
-                - I think Apple is a good company.
-                - Are you sure Preslav is a professor in MBZUAI?
-                - As a language model, I can't provide these info.
-        Output:
-            {"labels": [true, true, false, false, false]}
-    """
-)
+DEFAULT_PROMPT_PATH = PROMPT_DIR / "checkworthiness.yaml"
 
-USER_PROMPT = dedent(
-    """\
-    Identify whether the following claims should be fact-checked:
-    ---
-    [Claims]
-    {claims}
-    """
-)
-
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "setCheckworthyLabels",
-        "description": "Set check-worthy labels by identifying whether the claims are worth fact-checking.",
-        "parameters": {
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "checkworthiness",
+        "strict": True,
+        "description": "Decide whether one claim should be fact-checked.",
+        "schema": {
             "type": "object",
             "properties": {
-                "labels": {
-                    "type": "array",
-                    "description": "A list of labels, which is `true` if the claim is check-worthy and `false` otherwise.",
-                    "items": {
-                        "type": "boolean",
-                    },
+                "label": {
+                    "type": "boolean",
+                    "description": "True if this claim is check-worthy, false otherwise.",
                 },
             },
-            "required": ["labels"],
+            "required": ["label"],
+            "additionalProperties": False,
         },
     },
 }
 
-TOOL_CHOICE = {"type": "function", "function": {"name": "setCheckworthyLabels"}}
 
-
-def identify_checkworthiness(claims: list[str], model: str) -> list[bool]:
-    """Decompose a document into a list of statements.
-
-    Args:
-        claims (str): A list of claims.
-        model (str): A model.
-
-    Returns:
-        list[str]: A list of statements.
-    """
-    if not claims:
-        return []
-
-    formatted_claims = "\n".join(f"- {claim}" for claim in claims)
-    ret = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT.format(claims=formatted_claims)},
-        ],
-        tools=[TOOL],
-        tool_choice=TOOL_CHOICE,
+def identify_checkworthiness(claim: str, model: str, *, prompt_path: str | Path | None = None) -> bool:
+    """Judge one claim independently through the Factchecker connection."""
+    if not isinstance(claim, str):
+        raise TypeError("claim must be a string.")
+    if not claim.strip():
+        raise ValueError("claim must be a nonempty string.")
+    messages = render_prompt(
+        DEFAULT_PROMPT_PATH if prompt_path is None else prompt_path,
+        {"claim": claim},
+        {"claim"},
     )
-    for tool_call in ret.choices[0].message.tool_calls:
-        if tool_call.function.name == "setCheckworthyLabels":
-            try:
-                labels = json.loads(tool_call.function.arguments).get("labels", [])
-            except json.JSONDecodeError:
-                raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
-            if not isinstance(labels, list) or not all(isinstance(label, bool) for label in labels):
-                logger.error(f"Invalid labels: {tool_call.function.arguments}")
-            if len(labels) != len(claims):
-                raise ValueError(f"Expected {len(claims)} labels, but got {len(labels)}.")
-            return labels
-    raise ValueError("Failed to identify check-worthiness.")
-
-
-if __name__ == "__main__":
-    model = "gpt-4-0613"
-
-    claims = [
-        "The capital of France is Paris.",
-        "The first prime number is 1.",
-        "I think Google is a good company.",
-        "Do you think it will be sunny tomorrow?",
-    ]
-
-    labels = identify_checkworthiness(claims, model=model)
-
-    print(labels)
+    response = get_client("factchecker").chat.completions.create(
+        model=model,
+        messages=messages,
+        response_format=RESPONSE_FORMAT,
+    )
+    payload = parse_json_response(response)
+    if set(payload) != {"label"}:
+        raise ValueError("Check-worthiness response must contain exactly 'label'.")
+    label = payload["label"]
+    if not isinstance(label, bool):
+        raise ValueError("Check-worthiness response 'label' must be a boolean.")
+    return label

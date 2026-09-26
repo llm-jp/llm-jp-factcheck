@@ -1,0 +1,229 @@
+"""Deterministic fictional fixtures for trying the interface entirely offline."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import partial
+from time import sleep
+from typing import Iterator
+
+from batching import completed_requests, request_batch
+from pipeline import PipelineConfig, PipelineEvent, claim_event
+
+CHAT_INITIAL_DELAY = 1.0
+CHAT_CHUNK_DELAY = 0.08
+DECOMPOSITION_DELAY = 1.0
+CHECKWORTHINESS_DELAY = 0.6
+PREPARATION_DELAY = 0.4
+RETRIEVAL_STAGE_DELAY = 0.4
+VERIFICATION_DELAY = 0.6
+
+
+@dataclass(frozen=True)
+class _Fixture:
+    claim: str
+    label: str
+    passages: tuple[str, ...]
+    rationale: str
+    is_checkworthy: bool = True
+
+
+_FIXTURES = (
+    _Fixture(
+        "Northstar Museum opened in 2012.",
+        "Fully supported",
+        (
+            "Fictional opening record: Northstar Museum first opened to visitors in 2012.",
+            "Fictional anniversary note: Northstar Museum celebrated ten years since its 2012 opening in 2022.",
+            "Fictional museum history: Northstar Museum opened its doors in 2012.",
+        ),
+        "The sample record explicitly confirms that the museum opened in 2012.",
+    ),
+    _Fixture(
+        "Northstar Museum opens at 9 a.m. and closes at 6 p.m.",
+        "Partially supported",
+        (
+            "Fictional visitor guide: Northstar Museum opens at 9 a.m. The guide does not list a closing time.",
+            "Fictional timetable: Northstar Museum opening time is 09:00. Closing time is not recorded.",
+            "Fictional entrance notice: Northstar Museum opens at 9 a.m.; no closing time is given.",
+        ),
+        "The sample supports the 9 a.m. opening time but leaves the claimed 6 p.m. closing time unresolved.",
+    ),
+    _Fixture(
+        "Northstar Museum has a cafe and a gift shop.",
+        "Fully refuted",
+        (
+            "Fictional facilities list: Northstar Museum has a cafe. It does not have a gift shop.",
+            "Fictional floor plan: Northstar Museum includes a cafe; the museum has no gift shop.",
+            "Fictional amenities guide: Northstar Museum offers a cafe but no gift shop.",
+        ),
+        "The explicit contradiction about the gift shop refutes the claim, even though the cafe is confirmed.",
+    ),
+    _Fixture(
+        "Northstar Museum is closed on Mondays.",
+        "Inferentially refuted",
+        (
+            "Fictional weekly schedule: Northstar Museum is open every weekday.",
+            "Fictional visitor notice: Northstar Museum welcomes visitors on all weekdays.",
+            "Fictional opening calendar: Northstar Museum is open each weekday.",
+        ),
+        "Knowing that Monday is a weekday, the schedule implies that the museum is open on Mondays.",
+    ),
+    _Fixture(
+        "The director of Northstar Museum is Morgan Vale.",
+        "Not enough information",
+        (
+            "Fictional access guide: Northstar Museum has bicycle parking beside its entrance.",
+            "Fictional visitor guide: Northstar Museum provides lockers for visitors' bags.",
+            "Fictional facilities notice: Northstar Museum has a visitor information desk near the entrance.",
+        ),
+        "The sample describes visitor facilities and provides no information about the museum's director.",
+    ),
+    _Fixture(
+        "Northstar Museum opened before 2015.",
+        "Inferentially supported",
+        (
+            "Fictional anniversary notice: Northstar Museum marked its tenth anniversary in 2022.",
+            "Fictional celebration record: Northstar Museum celebrated ten years of operation in 2022.",
+            "Fictional event program: Northstar Museum celebrated its tenth anniversary during 2022.",
+        ),
+        "A tenth anniversary in 2022 implies an opening in 2012, which is before 2015.",
+    ),
+    _Fixture("Northstar Museum is wonderful.", "", (), "", is_checkworthy=False),
+)
+
+MOCK_CLAIMS = tuple(fixture.claim for fixture in _FIXTURES)
+
+
+def stream_mock_chat_response(messages: list[dict], model: str) -> Iterator[str]:
+    """Stream a fixed sample, with the current user-turn count for orientation."""
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("Chat history must contain a user message.")
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
+            raise ValueError("Chat messages must have a user or assistant role.")
+        if not isinstance(message.get("content"), str) or not message["content"].strip():
+            raise ValueError("Chat messages must contain nonempty text.")
+    if messages[-1]["role"] != "user":
+        raise ValueError("The last chat message must be from the user.")
+    turn = sum(message["role"] == "user" for message in messages)
+    response = (
+        f"Fictional sample response (turn {turn})\n\n"
+        "These fixed claims describe the invented Northstar Museum. "
+        "Select Fact-check response to view sample evidence and verdicts.\n\n"
+        + "\n".join(f"- {claim}" for claim in MOCK_CLAIMS)
+    )
+    sleep(CHAT_INITIAL_DELAY)
+    for start in range(0, len(response), 48):
+        if start:
+            sleep(CHAT_CHUNK_DELAY)
+        yield response[start : start + 48]
+
+
+def _check_fixture(fixture: _Fixture) -> bool:
+    sleep(CHECKWORTHINESS_DELAY)
+    return fixture.is_checkworthy
+
+
+def _verify_fixture(fixture: _Fixture) -> dict[str, str]:
+    sleep(VERIFICATION_DELAY)
+    return {"label": fixture.label, "rationale": fixture.rationale}
+
+
+def _retrieve_fixture(fixture: _Fixture, num_evidences: int) -> list[dict]:
+    sleep(RETRIEVAL_STAGE_DELAY)
+    return [{"passage": passage, "dataset": "Mock evidence"} for passage in fixture.passages[:num_evidences]]
+
+
+def run_mock_factcheck(document: str, context: str | None, config: PipelineConfig) -> Iterator[PipelineEvent]:
+    """Check only recognized fixture claims using bundled synthetic evidence."""
+    yield PipelineEvent("decomposition", "Finding sample claims in this response…")
+    sleep(DECOMPOSITION_DELAY)
+    fixtures = sorted(
+        (fixture for fixture in _FIXTURES if fixture.claim in document),
+        key=lambda fixture: document.index(fixture.claim),
+    )
+    total = len(fixtures)
+    yield PipelineEvent(
+        "decomposition", f"Sample claims found: {total}.", total_claims=total, claims=[item.claim for item in fixtures]
+    )
+    if not fixtures:
+        yield PipelineEvent("complete", "No recognized sample claims in this response.", claims=[])
+        return
+    yield PipelineEvent("checkworthiness", "Identifying check-worthy sample claims…", total_claims=total)
+    results = [
+        {
+            "claim": fixture.claim,
+            "is_checkworthy": None,
+            "evidences": [],
+            "no_evidence": False,
+            "status": "checkworthiness",
+            "mock": True,
+        }
+        for fixture in fixtures
+    ]
+    with request_batch([partial(_check_fixture, fixture) for fixture in fixtures], config.max_concurrency) as futures:
+        for completed, (index, future) in enumerate(completed_requests(futures), 1):
+            result = results[index]
+            result["is_checkworthy"] = future.result()
+            result["status"] = "retrieval" if result["is_checkworthy"] else "complete"
+            progress = 0.05 + 0.15 * completed / total
+            yield claim_event(
+                "checkworthiness",
+                f"Sample check-worthiness assessed: {completed} / {total} claims.",
+                index,
+                results,
+                progress,
+            )
+            if not result["is_checkworthy"]:
+                yield claim_event(
+                    "claim_complete",
+                    f"Sample claim {index + 1} / {total}: not check-worthy; retrieval and verification skipped.",
+                    index,
+                    results,
+                    progress,
+                )
+    search_targets = [index for index, result in enumerate(results) if result["is_checkworthy"]]
+    if search_targets:
+        yield PipelineEvent("preparation", "Preparing bundled mock evidence…", total_claims=total)
+        sleep(PREPARATION_DELAY)
+        yield PipelineEvent(
+            "retrieval", f"Selecting mock evidence: 0 / {len(search_targets)} claims…", total_claims=total
+        )
+        requests = [partial(_retrieve_fixture, fixtures[index], config.num_evidences) for index in search_targets]
+        with request_batch(requests, config.max_concurrency) as futures:
+            for completed, (position, future) in enumerate(completed_requests(futures), 1):
+                index = search_targets[position]
+                results[index]["evidences"] = future.result()
+                results[index]["status"] = "verification"
+                yield claim_event(
+                    "retrieval",
+                    f"Mock evidence selected: {completed} / {len(search_targets)} claims.",
+                    index,
+                    results,
+                    0.25 + 0.25 * completed / len(search_targets),
+                )
+    pairs = [(index, evidence) for index, result in enumerate(results) for evidence in result["evidences"]]
+    requests = [partial(_verify_fixture, fixtures[index]) for index, _ in pairs]
+    if requests:
+        yield PipelineEvent("verification", f"Applying sample verdicts: 0 / {len(requests)}…", total_claims=total)
+    with request_batch(requests, config.max_concurrency) as futures:
+        for completed, (position, future) in enumerate(completed_requests(futures), 1):
+            index, evidence = pairs[position]
+            evidence["verification"] = future.result()
+            finished = all("verification" in item for item in results[index]["evidences"])
+            if finished:
+                results[index]["status"] = "complete"
+            progress = 0.5 + 0.48 * completed / len(pairs)
+            yield claim_event(
+                "verification", f"Sample verdicts applied: {completed} / {len(pairs)}.", index, results, progress
+            )
+            if finished:
+                yield claim_event(
+                    "claim_complete",
+                    f"Sample claim {index + 1} / {total}: sample verification complete.",
+                    index,
+                    results,
+                    progress,
+                )
+    yield PipelineEvent("complete", f"Sample fact-check complete. Claims processed: {total}.", total, total)

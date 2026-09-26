@@ -1,0 +1,236 @@
+{
+  "completed_at": "2026-09-16T12:15:25.261577+00:00",
+  "protocol": {
+    "source": {
+      "repository": "llm-jp-evidence-verification-dataset",
+      "revision": "e43e3898959860caa0feaf1708e820ecec330584",
+      "prompt_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl.txt",
+      "test_source": "data/aio_test.json",
+      "gold_source": "data/claim_decomposition/AIO.json",
+      "fewshot_source": "scripts/prompts/decomposition/fewshot/8shot.txt",
+      "fewshot_document_ids": [
+        "AIO02-0044",
+        "AIO02-0038",
+        "AIO02-0081",
+        "AIO02-0092",
+        "AIO02-0053",
+        "AIO02-0060",
+        "AIO02-0069",
+        "AIO02-0074"
+      ],
+      "additional_shots": 8,
+      "incomplete_guideline_8shot_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl_8shot.txt",
+      "adaptation": "Use the existing zero-shot guideline plus all eight fewshot examples; the guideline_8shot source contains only the first six. Adapt example outputs to the application claims object."
+    },
+    "dataset": "AIO test",
+    "documents": 210,
+    "gold_claims": 1169,
+    "model": "gpt-5.4-2026-03-05",
+    "runs": 5,
+    "prompt_sha256": "ca29eba0d7381fa16130d3e5bf553702fd0ac6f0af8f5fabd22e5b34ca46e7ce",
+    "gold_sha256": "a9d9ca91f3df01262d9625837e8c505d202f667741f8513bddb8ea0e22d3ab50",
+    "implementation_sha256": {
+      "decompose.py": "bc07fc10e467fee1d0a0645552d072fcd8745fef71a0caa1db94e46ca68dd51b",
+      "claim_metrics.py": "80328210a31bdbd4d0e0755939ada398c230fee77b9ca47e7c9109ec058b2769"
+    },
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "decomposition",
+        "strict": true,
+        "description": "Create a list of self-contained claims from generated text.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "description": "Claims in the same language and order as the source text.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "claims"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "context": "none (generated text only, as in the reference experiment)",
+    "sampling": "provider defaults; no temperature, top_p, or seed override",
+    "matching": "maximum-weight one-to-one assignment, then similarity >= threshold",
+    "fuzzy_threshold": 0.8,
+    "tokenizer": "MeCab, UniDic-lite, POS noun/verb/adjective/adverb; feature[10] with surface fallback",
+    "aggregation": "macro P/R/F1 across documents, then mean and population SD across independent runs",
+    "versions": {
+      "openai": "2.54.0",
+      "mecab-python3": "1.0.12",
+      "unidic-lite": "1.0.8",
+      "scipy": "1.18.1"
+    }
+  },
+  "runs": [
+    {
+      "exact": {
+        "precision": 0.26597878545357534,
+        "recall": 0.23447557733272018,
+        "f1": 0.24566237354140938
+      },
+      "fuzzy_content": {
+        "precision": 0.597506133766638,
+        "recall": 0.5209489848775563,
+        "f1": 0.5487381454360667
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.2728519892805607,
+        "recall": 0.2399475788761503,
+        "f1": 0.25164933471036965
+      },
+      "fuzzy_content": {
+        "precision": 0.6069389472960901,
+        "recall": 0.5232017585589014,
+        "f1": 0.5535443048709761
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.27707604564747423,
+        "recall": 0.2502308273736845,
+        "f1": 0.2595165686198415
+      },
+      "fuzzy_content": {
+        "precision": 0.6236463602535031,
+        "recall": 0.5542956910814054,
+        "f1": 0.5794529821088865
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.2609472273757988,
+        "recall": 0.23315689601403886,
+        "f1": 0.24290033423912238
+      },
+      "fuzzy_content": {
+        "precision": 0.5988084930942074,
+        "recall": 0.5194159015587587,
+        "f1": 0.5477314508126553
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.2531086506086506,
+        "recall": 0.2239558325272611,
+        "f1": 0.23427094237686896
+      },
+      "fuzzy_content": {
+        "precision": 0.6040649165649166,
+        "recall": 0.5267632367632368,
+        "f1": 0.5539574931105228
+      }
+    }
+  ],
+  "mean": {
+    "exact": {
+      "precision": 0.26599253967321196,
+      "recall": 0.236353342424771,
+      "f1": 0.24679991069752238
+    },
+    "fuzzy_content": {
+      "precision": 0.606192970195071,
+      "recall": 0.5289251145679718,
+      "f1": 0.5566848752678215
+    }
+  },
+  "std": {
+    "exact": {
+      "precision": 0.008501130705761134,
+      "recall": 0.008636488258918763,
+      "f1": 0.00847001814031167
+    },
+    "fuzzy_content": {
+      "precision": 0.009377606814186272,
+      "recall": 0.012923934765899071,
+      "f1": 0.011653349814271562
+    }
+  },
+  "reference_parity": {
+    "reference_revision": "e43e3898959860caa0feaf1708e820ecec330584",
+    "reference_file": "scripts/evaluate_claim_decomposition.py",
+    "runs": 5,
+    "document_metric_comparisons": 2100,
+    "mismatches": []
+  },
+  "initial_reference_parity": {
+    "reference_revision": "e43e3898959860caa0feaf1708e820ecec330584",
+    "reference_file": "scripts/evaluate_claim_decomposition.py",
+    "runs": 5,
+    "document_metric_comparisons": 2100,
+    "mismatches": [
+      {
+        "run": 3,
+        "textId": "AIO02-0362",
+        "metric": "fuzzy_content",
+        "reference": [
+          0.9,
+          0.8181818181818182,
+          0.8571428571428572
+        ],
+        "actual": [
+          0.8,
+          0.7272727272727273,
+          0.761904761904762
+        ]
+      },
+      {
+        "run": 5,
+        "textId": "AIO02-0362",
+        "metric": "fuzzy_content",
+        "reference": [
+          0.9,
+          0.8181818181818182,
+          0.8571428571428572
+        ],
+        "actual": [
+          0.8,
+          0.7272727272727273,
+          0.761904761904762
+        ]
+      }
+    ]
+  },
+  "comparison": {
+    "baseline": "decomposition_guideline_zero_shot.json",
+    "matched_protocol_fields": [
+      "model",
+      "dataset",
+      "documents",
+      "gold_claims",
+      "runs",
+      "gold_sha256",
+      "implementation_sha256",
+      "response_format",
+      "context",
+      "sampling",
+      "matching",
+      "fuzzy_threshold",
+      "tokenizer",
+      "aggregation",
+      "versions"
+    ],
+    "delta": {
+      "exact": {
+        "precision": 0.058901493153594026,
+        "recall": 0.05356328063470919,
+        "f1": 0.05521245320717852
+      },
+      "fuzzy_content": {
+        "precision": 0.06940914555410349,
+        "recall": 0.07255055790770082,
+        "f1": 0.0709647267742401
+      }
+    }
+  }
+}

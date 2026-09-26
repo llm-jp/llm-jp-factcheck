@@ -1,27 +1,374 @@
 # LLM-jp Factcheck
 
-## Requirements
+A Streamlit application for chatting with an LLM and checking its responses using evidence retrieved from its training data. Each response is decomposed into claims, check-worthy claims are selected, and relevant passages are retrieved from the indexed training corpus. Each claim–evidence pair receives a verdict. Users can inspect the evidence passages and their sources as results arrive.
 
-- Python: 3.10
+## Setup
 
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-Create a `.env` file in the root directory with the following content:
-
-```
-AZURE_OPENAI_API_KEY="xxx"
-AZURE_OPENAI_ENDPOINT="https://xxx.openai.azure.com"
-AZURE_OPENAI_API_VERSION="2023-05-15"
-```
-
-Then run the following command:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run all commands from the project root. The project uses Python 3.12, selected by `.python-version`. Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
 
 ```bash
-streamlit run src/pipeline.py
+uv sync --locked
 ```
+
+### Model connections
+
+Create `.env` in the project root using [`.env.example`](.env.example) as a template. Configure chat generation with `CHATBOT_` variables and decomposition, check-worthiness, and verification with `FACTCHECKER_` variables. Each role can independently use an OpenAI-compatible endpoint or Azure OpenAI.
+
+| Setting | Chat generation | Decomposition, check-worthiness, and verification | Required |
+| --- | --- | --- | --- |
+| API type | `CHATBOT_API_TYPE` | `FACTCHECKER_API_TYPE` | `openai` or `azure` |
+| Endpoint | `CHATBOT_ENDPOINT` | `FACTCHECKER_ENDPOINT` | Yes |
+| API key | `CHATBOT_API_KEY` | `FACTCHECKER_API_KEY` | Yes; use a dummy value for a local server without authentication |
+| API version | `CHATBOT_API_VERSION` | `FACTCHECKER_API_VERSION` | Only when API type is `azure` |
+| Model | `CHATBOT_MODEL` | `FACTCHECKER_MODEL` | Optional; see model selection below |
+
+With `API_TYPE=openai`, supply the complete API base URL, including its path: `https://api.openai.com/v1` for OpenAI, `http://localhost:8000/v1` for a compatible local server, or `https://your-resource.openai.azure.com/openai/v1` for an [Azure v1 endpoint](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle). The role's `API_VERSION` is ignored in this mode.
+
+With `API_TYPE=azure`, supply the Azure resource root, such as `https://your-resource.openai.azure.com`, and an API version supported by that resource. Model arguments are Azure deployment names in this mode. These modes use the SDK's `OpenAI` and `AzureOpenAI` clients, respectively; see the [official Python SDK reference](https://developers.openai.com/api/reference/python).
+
+For example, use a local chatbot and an Azure fact-checker:
+
+```dotenv
+CHATBOT_API_TYPE="openai"
+CHATBOT_ENDPOINT="http://localhost:8000/v1"
+CHATBOT_API_KEY="unused"
+CHATBOT_MODEL="your-local-model-id"
+
+FACTCHECKER_API_TYPE="azure"
+FACTCHECKER_ENDPOINT="https://your-resource.openai.azure.com"
+FACTCHECKER_API_KEY="your-factchecker-api-key"
+FACTCHECKER_API_VERSION="your-supported-api-version"
+FACTCHECKER_MODEL="your-factcheck-deployment-name"
+```
+
+The chatbot endpoint must support streaming chat completions. The fact-checker endpoint, API version, and selected model must support [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) through Chat Completions with `response_format.type=json_schema` and `strict=true`. This requirement applies to OpenAI-compatible servers and Azure deployments as well. Clients are created when first used and cached until the process exits. Restart Streamlit after editing connection or model settings in `.env` or the environment.
+
+Decomposition, check-worthiness, and verification each send a JSON Schema and read the JSON object from the assistant message content. All schema fields are required, extra fields are forbidden, and verification labels are constrained to the six supported values. Refusals, incomplete responses, invalid JSON, and invalid values are reported as errors. Unsupported endpoints are not retried with function calling or a weaker output format.
+
+For compatibility, a role with none of its four prefixed connection variables set uses the shared legacy `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION` settings. Setting any prefixed connection variable requires a complete configuration for that role; missing values are never filled from the shared settings. Model variables alone do not disable this legacy connection fallback. Global `OPENAI_*` variables are not used as a fallback.
+
+### Retrieval
+
+Retrieval requires an existing Elasticsearch index of the LLM's training data containing `token_ids` (space-separated token IDs), `dataset_name` (source), and `iteration` (training step). Source details come directly from each search result.
+
+Configure retrieval with environment variables or `.env`:
+
+| CLI argument | Environment variable | Default |
+| --- | --- | --- |
+| `--tokenizer_name` | `TOKENIZER_NAME` | `llm-jp/llm-jp-3-13b` |
+| `--es_host` | `ES_HOST` | `http://10.2.73.12:9200` |
+| `--es_dump_index` | `ES_DUMP_INDEX` | `llm-jp-corpus-v3` |
+
+CLI arguments take precedence over environment variables, followed by the defaults above. Existing process environment variables take precedence over `.env`; blank or whitespace-only values use the defaults. Restart Streamlit after changing these settings.
+
+Set `TOKENIZER_NAME` or `--tokenizer_name` to the tokenizer used to build the index. The first fact-check downloads the tokenizer from Hugging Face if it is not cached.
+
+Retrieval follows the `v3.0` branch: encode each claim without special tokens, search the `token_ids` field with a match query, and request the top three hits by default. Override the count with `--num_evidences`. Each hit is decoded into a complete evidence passage in Elasticsearch result order, with its source and training step preserved. Passages are not split or reranked locally. Empty passages are skipped.
+
+## Run
+
+With the connection and model settings configured in `.env`, run:
+
+```bash
+uv run --locked streamlit run src/serve.py
+```
+
+Model selection uses the following precedence:
+
+| Role | Highest to lowest priority |
+| --- | --- |
+| Fact-checker | `--engine`, then `FACTCHECKER_MODEL`, then `gpt-5.4-2026-03-05` |
+| Chatbot | `--chat-engine`, then `CHATBOT_MODEL`, then the resolved fact-checker model |
+
+The app loads the project-root `.env` without overriding existing process environment variables. Blank or whitespace-only model variables count as unset. Use model IDs accepted by the endpoint in `openai` mode and deployment names in `azure` mode. Azure v1 endpoints also expect deployment names.
+
+The default Factchecker model is [`gpt-5.4-2026-03-05`](https://developers.openai.com/api/docs/models/gpt-5.4). Override it with `FACTCHECKER_MODEL` or `--engine`. For Azure, use your deployment name, which may differ from the model ID.
+
+Override model settings and supply retrieval options on the command line:
+
+```bash
+uv run --locked streamlit run src/serve.py -- \
+  --engine your-factcheck-deployment-name \
+  --chat-engine your-local-model-id \
+  --es_host http://10.2.73.12:9200 \
+  --es_dump_index llm-jp-corpus-v3 \
+  --tokenizer_name llm-jp/llm-jp-3-13b \
+  --num_evidences 3 \
+  --max-concurrency 8
+```
+
+## Mock mode
+
+After `uv sync --locked`, try the interface without API credentials, Elasticsearch, or tokenizer downloads:
+
+```bash
+uv run --locked streamlit run src/serve.py -- --mock
+```
+
+`--mock` replaces chat and the entire fact-checking pipeline with bundled, deterministic fictional fixtures. It supports multi-turn chat, streamed response fragments, stage progress, all six verdict labels, a non-check-worthy claim that is skipped, and per-response checks. The interface identifies mock mode and synthetic results. The canned content demonstrates the interface; it does not evaluate a model or real-world claims.
+
+Artificial pauses make response generation and verification progress visible: approximately two seconds per chat response and three seconds per fact-check with the default evidence count and concurrency, excluding UI overhead. Mock check-worthiness, retrieval, and verification use the same bounded parallel execution as live requests. Adjust the delay constants in `src/mock_backend.py` to change these timings.
+
+Mock mode does not load `.env` and ignores environment-based configuration. It also ignores model, endpoint, retrieval, and prompt-selection settings. `--num_evidences` selects up to three available synthetic evidence passages per claim (three by default), and `--max-concurrency` limits simultaneous mock tasks. Fixtures can be edited in `src/mock_backend.py`. Mock mode is off by default; omit `--mock` to use the configured live services.
+
+## Workflow
+
+Send messages through the chat input to continue a conversation. Select **Fact-check response** below any assistant response to check it. Only the selected response is decomposed; its preceding conversation history is supplied automatically as context for resolving references and omitted information.
+
+Each reply displays the Chatbot model or Azure deployment name used to generate it, including during generation. The name is saved with the reply so it remains consistent if the model configuration changes. Mock responses display **Mock model**.
+
+Results remain associated with their response as the conversation continues. Claims, evidence, and verdicts are kept outside the chat history sent to the LLM. **New chat** clears the conversation and its verification results.
+
+Failures display a short retry message. Technical exception details and tracebacks are recorded in the server logs and are not shown in the interface. Partial fact-check results remain available after a failure.
+
+The first fact-check starts immediately. Checking the same response again opens a confirmation modal: **Run again** replaces its existing results, while **Cancel**, the close button, or Escape keeps them. The progress indicator disappears when the run ends. The **Source** section below the rationale shows the source name. Expand **Evidence passage** to read the passage itself. Training steps are not displayed.
+
+The top of **Fact-check results** shows **Claims**, **Check-worthy claims**, **Verdicts**, and the distribution across all six verdict labels, including zero counts. Claim counts appear after decomposition, and check-worthy claim counts update as those decisions arrive. Each verdict belongs to one claim–evidence pair; conflicting verdicts remain separate and are never combined by majority vote. With three retrieved passages per check-worthy claim and all verifications complete, the verdict count equals the check-worthy claim count multiplied by three. Only completed verifications count toward verdicts and their distribution, so fewer retrieved passages, pending requests, or failed requests can reduce that total.
+
+Select a verdict card to show only matching claim–evidence pairs. Select the same card again or **Show all verdicts** to clear the filter. The selected card is outlined, and summary counts always describe the full results. Claim and evidence numbers retain their original positions. Filters are independent for each response, apply to new verdicts as they arrive, and reset when that response is checked again. Filtering does not make additional model or retrieval requests.
+
+During a fact-check, its button changes to **Pause fact-check**. Pausing stops new requests from starting while retaining the current pipeline, progress, and intermediate results. Requests already sent may finish and their responses are retained for resumption. Select **Resume fact-check** to continue without repeating completed requests. The progress bar stays visible while paused; activity icons stop. **New chat** discards paused or running checks and cancels work that has not started.
+
+After decomposition, the Factchecker model assesses each claim independently in its own check-worthiness request. These requests run concurrently. Non-check-worthy claims remain visible with a skipped message and receive no verification verdict. If every claim is skipped, neither the tokenizer nor Elasticsearch is initialized. The app searches Elasticsearch concurrently for all check-worthy claims, then submits the individual claim–evidence verification requests concurrently across all claims. Tokenization and decoding happen on the calling thread. Results retain the original claim order and Elasticsearch evidence order. When retrieval returns no usable evidence, the app explicitly displays that condition with `Not enough information` and skips the verification API call.
+
+`--max-concurrency` (default: `8`) limits simultaneous HTTP requests in each of the check-worthiness, Elasticsearch retrieval, and verification stages; use `1` for sequential execution. These are parallel requests to Chat Completions and Elasticsearch, not asynchronous OpenAI Batch API jobs. The claim list appears immediately after decomposition. Check-worthiness decisions, retrieved passages and source details, and individual verification verdicts appear as each request finishes, without waiting for earlier claims or other evidence pairs. Claims and evidence stay in their original display positions. Progress counts completed work, regardless of completion order. API and retrieval failures are reported as errors rather than verdicts. Available intermediate results and completed verdicts remain visible after an error or interruption; queued work is cancelled on failure and already-running requests are allowed to finish.
+
+## Replace prompts
+
+Prompts are UTF-8 YAML files containing `system` and `user` strings. Literal blocks (`|` or `|-`) keep instructions, guidelines, and few-shot examples readable with their original line breaks. Edit the indented text to replace them. Existing custom JSON prompt files are also accepted.
+
+| Task | Default file | Required placeholders | Optional placeholders |
+| --- | --- | --- | --- |
+| Decomposition | `prompts/decomposition_8shot.yaml` | `{{document}}` | `{{context}}` |
+| Check-worthiness | `prompts/checkworthiness.yaml` | `{{claim}}` | None |
+| Verification | `prompts/verification.yaml` | `{{claim}}`, `{{evidence}}` | None |
+
+The check-worthiness template receives one claim in `{{claim}}`. Edit its `system` and `user` strings to change selection criteria or examples; files are reread on every call. Existing custom check-worthiness templates must replace `{{claims}}` with `{{claim}}` and request a single boolean `label`. The bundled criteria follow `v3.0`, with its subjective-opinion example corrected to `false` to match the stated criteria.
+
+For example, a minimal decomposition prompt is:
+
+```yaml
+system: |-
+  Decompose the response into minimal claims that can each be understood independently.
+user: |-
+  Context:
+  {{context}}
+  Response:
+  {{document}}
+```
+
+Keep block contents indented with spaces. `|-` removes the final newline; `|` preserves one final newline. JSON examples inside the blocks do not need escaping. Supported `{{...}}` placeholders are expanded once; placeholder-like text inside inputs is preserved. Files are reread on each call, so edits take effect on subsequent calls. Select alternate files without changing Python code:
+
+```bash
+uv run --locked streamlit run src/serve.py -- \
+  --engine your-factcheck-model-or-deployment \
+  --chat-engine your-chat-model-or-deployment \
+  --decomposition-prompt /path/to/decomposition.yaml \
+  --checkworthiness-prompt /path/to/checkworthiness.yaml \
+  --verification-prompt /path/to/verification.yaml
+```
+
+Python callers can set `prompt_path` on each function. Run scripts with `PYTHONPATH=src uv run --locked python your_script.py`:
+
+```python
+from checkworthy import identify_checkworthiness
+from decompose import decompose_document_into_claims
+from verify import verify_claim
+
+claims = decompose_document_into_claims(
+    "London is the capital of England.",
+    model="your-factcheck-model-or-deployment",
+    prompt_path="prompts/decomposition_8shot.yaml",
+)
+for claim in claims:
+    is_checkworthy = identify_checkworthiness(
+        claim,
+        model="your-factcheck-model-or-deployment",
+        prompt_path="prompts/checkworthiness.yaml",
+    )
+    if not is_checkworthy:
+        continue
+    result = verify_claim(
+        claim,
+        "London is the capital of England.",
+        model="your-factcheck-model-or-deployment",
+        prompt_path="prompts/verification.yaml",
+    )
+    # The result contains an English "label" and a brief "rationale".
+```
+
+JSON Schemas in Python define the output contract: decomposition returns a list of claim strings and check-worthiness reads a single boolean `label`. Verification requests a Japanese `label` and a brief English `rationale`, then maps the label to English for the application. The rationale should justify the verdict in one sentence of at most 40 words, identifying relevant evidence or missing information and any inference needed for an inferential label. This length is a prompt instruction; validation requires a nonempty string and does not truncate explanations. No few-shot demonstrations are included. Application validation rejects missing or extra fields, invalid labels, and empty rationales. The UI displays the rationale with the verdict and remains compatible with older results without one. Prompt files control instructions independently of the schemas and remain editable.
+
+Verification returns one of these six English labels:
+
+- `Fully supported`
+- `Inferentially supported`
+- `Partially supported`
+- `Fully refuted`
+- `Inferentially refuted`
+- `Not enough information`
+
+The model's JSON label must be one of `完全支持`, `推定支持`, `部分支持`, `完全否定`, `推定否定`, or `不明`, respectively. There is no partially-refuted category: an explicit contradiction about part of a claim is classified as fully refuted. Inferential support and refutation use the paper's definitions of implicit inference and background knowledge.
+
+The default decomposition prompt uses **guideline + 8-shot**, based on the rule/example/explanation guidelines and eight development examples from the paper's `experiment/lrec2026` branch. The 13 guideline sections and their instructional examples are retained in Japanese to preserve the source wording. Demonstration outputs use the application's JSON Schema contract. Conversation context is used only to resolve references; check-worthiness remains a separate step. The source revision, example IDs, and file paths are recorded in [evaluations/decomposition_8shot_source.json](evaluations/decomposition_8shot_source.json). Edit `prompts/decomposition_8shot.yaml` to change the default instructions. The zero-shot variant remains available in `prompts/decomposition.yaml`.
+
+Verification uses the **base prompt with a short rationale added**, derived from `feat/verdict_prediction` and [Masano et al. (ACL SRW 2026)](https://aclanthology.org/2026.acl-srw.99/). Its Japanese task and label definitions are retained; the output uses Structured Outputs with `label` followed by `rationale`. The source revision and paths are recorded in [evaluations/verification_source.json](evaluations/verification_source.json). Edit `prompts/verification.yaml` to change these instructions.
+
+## Fact-check generated answers in bulk
+
+Run decomposition, check-worthiness, evidence retrieval, and verification on answer JSONL containing `qid`, `question`, `response`, `model`, and `finish_reason` (`stop`):
+
+```bash
+uv run --locked python scripts/factcheck_answers.py \
+  --input result/your-generation/responses.jsonl \
+  --output result/your-factcheck
+```
+
+The runner uses `FACTCHECKER_*`, `TOKENIZER_NAME`, `ES_HOST`, and `ES_DUMP_INDEX` from the environment or `.env`, the application's default prompts, up to three evidence passages per check-worthy claim, and up to eight concurrent requests. Override these with `--model`, `--tokenizer-name`, `--es-host`, `--es-index`, `--num-evidences`, and `--max-concurrency`. The original question supplies conversation context for decomposition; reference answers are never used. Sampling uses provider defaults, matching the fact-checking functions.
+
+Every completed operation is checkpointed under `documents/`. Rerunning the same command skips completed decomposition, check-worthiness, retrieval, and verification operations. `--limit N` processes an initial subset; omit it later to continue the full input. `protocol.json` and `prompts/` record the input hash, model, retrieval settings, implementations, and prompt snapshots. `summary.json` reports progress and verdict counts; `results.jsonl` consolidates all answers and their claim results when the run ends. Non-check-worthy claims and claims with no retrieved evidence are counted separately from model verdicts. Errors are logged in `errors.jsonl`, preserve successful checkpoints, and cause a nonzero exit; rerun to retry missing operations.
+
+For the AIO top-3 run, reuse completed decomposition and check-worthiness in a **new** output directory, then retrieve the top three hits and verify each claim–evidence pair independently:
+
+```bash
+uv run --locked python scripts/prepare_factcheck_expansion.py \
+  --source result/aio_02_dev_v1.0_factcheck_gpt-oss-120b \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3 \
+  --num-evidences 3
+uv run --locked python scripts/factcheck_answers.py \
+  --input result/aio_02_dev_v1.0_llm-jp-3-13b-instruct2_temperature1.0_top-p1.0/responses.jsonl \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3 \
+  --num-evidences 3
+```
+
+Preparation runs once and refuses to overwrite an existing directory; resume with the second command. It preserves claim order and text but removes old retrieval and verification results, so all newly retrieved passages receive fresh verdicts. Each item in `claims[].evidences[]` keeps its retrieval `rank` and its own `verification.label` and `verification.rationale`; passages are neither concatenated nor reduced to an aggregate verdict. `reuse_provenance.json` records the original input and reused stages. Elasticsearch must be reachable (for this workspace, through the temporary SSH tunnel).
+
+To aggregate the completed top-three passage verdicts into one label per check-worthy claim:
+
+```bash
+uv run --locked python scripts/aggregate_claim_verdicts.py \
+  --input result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3/results.jsonl \
+  --output result/aio_02_dev_v1.0_factcheck_gpt-oss-120b_top3/claim_aggregation
+```
+
+`Fully supported`, `Inferentially supported`, and `Partially supported` count as support; `Fully refuted` and `Inferentially refuted` count as refutation. Any support yields `Supported`, otherwise any refutation yields `Refuted`, otherwise the label is `Insufficient evidence`. Support takes priority when passages disagree. This is a local post-processing step with no API calls. It requires three completed verdicts per check-worthy claim, retains question IDs, claim indices, and passage labels in `claims.jsonl`, and saves counts in `summary.json`, `summary.csv`, and `summary.md`. Non-check-worthy claims retain a null aggregate label and are excluded from the label counts and percentage denominator. `protocol.json` records the mapping and source/implementation hashes.
+
+## Select final-answer claims and compare with reference answers
+
+Use `gpt-oss-120b` through the `FACTCHECKER_*` connection to select one existing claim per answer, then independently compare that claim with the dataset's accepted answers:
+
+```bash
+uv run --locked python scripts/evaluate_final_answer_claims.py \
+  --input result/aio_02_dev_v1.0_factcheck_gpt-oss-120b/results.jsonl \
+  --gold data/aio_02_dev_v1.0.jsonl \
+  --output result/aio_02_dev_v1.0_final_answer_claims_gpt-oss-120b
+```
+
+Selection sees only the question, generated response, and indexed existing claims, including non-check-worthy claims. It never sees reference answers or evidence verdicts. The second model request sees the question, selected claim, and `answers` aliases; it labels semantic agreement as `match`, `mismatch`, or `undetermined`. When no existing claim corresponds to the final answer, selection returns `no_matching_claim` and the second request records `no_claim`, without inventing a claim or grading an absent claim as incorrect. Both stages use provider sampling defaults.
+
+Each result records the original claim index and text, model rationales, response metadata, and correctness label. `documents/` saves every successful stage; rerunning the same command skips saved work. Use `--limit N` for an initial subset and omit it to resume all questions. `protocol.json` and `prompts/` freeze inputs, implementation hashes, and prompts. `summary.json` reports progress and label counts; `results.jsonl` consolidates results when the run ends. The match rate over all questions and the match rate over decided claims have separate denominators; neither treats `undetermined` or `no_claim` as a model judgment of incorrectness.
+
+## Compare answer correctness with evidence verification
+
+The [AIO02 matrix and qualitative analysis](evaluations/aio_02_answer_verification_matrix.md) pairs each final-answer correctness result with the verification verdict for the exact same selected claim. It includes all 1,000 questions and reviews up to 20 randomly sampled examples per nonempty cell (274 examples, seed 20260920). Unchecked claims and missing selections remain separate from the six verification labels.
+
+```bash
+uv run --locked python scripts/analyze_answer_verification_matrix.py \
+  --answers result/aio_02_dev_v1.0_final_answer_claims_gpt-oss-120b/results.jsonl \
+  --factchecks result/aio_02_dev_v1.0_factcheck_gpt-oss-120b/results.jsonl \
+  --output result/aio_02_dev_v1.0_answer_verification_analysis \
+  --seed 20260920 --sample-size 20 --review
+```
+
+Omit `--review` to generate the matrix and reproducible samples without API requests. Reviews use `gpt-oss-120b` through `FACTCHECKER_*`, retain original labels, and checkpoint each case. The report distinguishes model-assisted observations from annotations made while checking the source text; neither constitutes a corrected human gold dataset.
+
+## Evaluate claim decomposition
+
+See the completed [guideline/zero-shot evaluation](evaluations/decomposition_guideline_zero_shot.md) and [guideline/8-shot comparison](evaluations/decomposition_guideline_8shot.md) for five-run AIO test results with `gpt-5.4-2026-03-05`.
+
+With the same guideline + 8-shot prompt, **gpt-oss-120b** achieves exact precision/recall/F1 of **0.1779 / 0.1600 / 0.1660** and fuzzy precision/recall/F1 of **0.5428 / 0.4752 / 0.4984**, averaged over five runs. Compared with GPT-5.4, exact F1 decreases by **0.0808** and fuzzy F1 by **0.0583**. All 1,050 document predictions were completed, and all 2,100 document/metric comparisons match the original evaluator. The JSON-to-YAML migration preserves the prompt text exactly. See the [GPT-OSS decomposition report](evaluations/decomposition_gpt_oss_120b.md) and [machine-readable results](evaluations/decomposition_gpt_oss_120b.json) for run variation and comparison conditions.
+
+The evaluation follows §6.2 of [Masano et al. (LREC 2026)](https://aclanthology.org/2026.lrec-1.186/): exact string matching and fuzzy matching with content-word Jaccard similarity. A maximum-weight one-to-one assignment matches predicted and gold claims before applying the threshold. Fuzzy matches use `similarity >= 0.8`, following the reference code. MeCab with UniDic-lite extracts nouns, verbs, adjectives, and adverbs using the reference evaluator's field 10, with surface-form fallback. Precision, recall, and F1 are calculated per generated text and macro-averaged separately. The reported result averages five independent prediction runs.
+
+Install the optional evaluation dependencies and evaluate the default **guideline + 8-shot** prompt on a configured GPT-OSS deployment:
+
+```bash
+uv sync --locked --group evaluation
+uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --model gpt-oss-120b \
+  --max-concurrency 8 \
+  --output result/decomposition-gpt-oss-120b
+```
+
+The runner reads the pinned experiment revision directly from the dataset repository using `git show`; it does not change that repository's checkout. It uses the original AIO test split (210 texts, 1,169 gold claims), including non-check-worthy claims. It neither filters claims nor passes gold claims or the dataset's questions to the model. Only the generated text is decomposed, matching the reference experiment. The CBA test split is absent from this experiment revision and is not recreated or substituted with the verification dataset's split.
+
+To evaluate **guideline + 0-shot** instead, select both its prompt and source manifest:
+
+```bash
+uv run --locked --group evaluation python scripts/evaluate_decomposition.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --prompt prompts/decomposition.yaml \
+  --source-manifest evaluations/decomposition_source.json \
+  --model gpt-5.4-2026-03-05 \
+  --output result/decomposition-guideline-zero-shot
+```
+
+The eight demonstrations come from the pinned branch's `scripts/prompts/decomposition/fewshot/8shot.txt`. Its `manual_rule+example+expl_8shot.txt` actually contains only six demonstrations; those six are identical to the first six in the complete few-shot file. The eight-shot prompt combines the existing zero-shot guideline with all eight examples and adapts their output wrappers to `{"claims": [...]}`. All eight inputs were verified against the development set and have no overlap with the test set. Their document IDs and source paths are recorded in the source manifest. The app and evaluation runner use eight-shot by default. To select zero-shot in the app, pass `--decomposition-prompt prompts/decomposition.yaml` when starting Streamlit.
+
+This command sends live requests through the Factchecker endpoint configured in `.env`. Model precedence is `--model`, then `FACTCHECKER_MODEL`, then `gpt-5.4-2026-03-05`. `--prompt` changes the editable prompt file; `--runs` defaults to `5` and `--max-concurrency` to `8`. `--request-timeout` sets the API request timeout in seconds (default: `120`, with the SDK's standard retries). `--limit N` runs a clearly marked smoke-test subset. Each completed prediction is saved; rerunning the same command resumes missing predictions. A changed model, prompt, dataset, generation implementation, or dependency version requires a different output directory. Incomplete runs fail instead of silently dropping missing documents.
+
+The output directory contains the prompt snapshot, gold data, protocol and SHA-256 hashes, predictions for each run, per-document scores and match assignments, and `summary.json` with the run means and population standard deviations. Files under `result/` are ignored by Git. Recompute metrics without API requests using the same command with `--score-only`.
+
+Matching uses the reference Hungarian implementation, including its tie resolution. Different optimal assignments can have the same total similarity but different numbers of pairs above the threshold. If only `src/claim_metrics.py` changes, use `--score-only --refresh-metrics` to re-score existing predictions; the previous scoring protocol is preserved in `previous_scoring_protocol.json`. Changes to the model, prompt, dataset, generation code, or dependency versions still require a separate output directory.
+
+These results evaluate the application's configured model and Structured Outputs. The paper used GPT-4o, while this application defaults to GPT-5.4 and provider-default sampling. The prompt's output wrapper and handling of application context also differ from the original experimental runner. Treat these as an evaluation using the paper's guidelines and metrics, not an exact replication of its published model scores. Exact matching preserves the dataset's original whitespace and punctuation; the application's returned predictions have outer whitespace stripped as in normal use.
+
+## Evaluate verification
+
+The earlier GPT-5.4 evaluation without rationales achieved accuracy **0.6279**, macro precision **0.3990**, macro recall **0.4857**, and macro F1 **0.4000**, averaged over three runs. Its [evaluation report](evaluations/verification_base.md) and [machine-readable scores](evaluations/verification_base.json) are retained as the baseline. The command below evaluates the current prompt with short rationales; only verdict labels are scored, and the explanations are saved alongside them.
+
+For GPT-5.4 with short rationales, the three-run means are accuracy **0.6256**, macro precision **0.4019**, macro recall **0.4968**, and macro F1 **0.4028**. Compared with the baseline, macro F1 increases by **0.0028** and accuracy decreases by **0.0023**. All successful rationales were within the requested 40-word limit. See the [rationale evaluation report](evaluations/verification_rationale.md) and [machine-readable comparison](evaluations/verification_rationale.json) for per-label changes, run variation, and failures. These are descriptive differences, not a claim of statistical significance.
+
+With the same short-rationale prompt, **gpt-oss-120b** achieves accuracy **0.6537**, macro precision **0.4069**, macro recall **0.4803**, and macro F1 **0.4169** over three runs. One failed prediction out of 17,046 scheduled classifications is retained as incorrect. On 5,678 identical pairs shared with the archived GPT-4o results, macro F1 is **0.4169** for GPT-OSS, **0.4175** for GPT-4o, and **0.4028** for GPT-5.4. GPT-4o uses the label-only base setting; the serving environments also differ. See the [GPT-OSS evaluation report](evaluations/verification_gpt_oss_120b.md) and [machine-readable results](evaluations/verification_gpt_oss_120b.json) for the comparison conditions, per-label metrics, and rationale lengths.
+
+To evaluate the current prompt on a configured GPT-OSS deployment:
+
+```bash
+uv run --locked --group evaluation python scripts/evaluate_verification.py \
+  --dataset-repo /path/to/llm-jp-evidence-verification-dataset \
+  --model gpt-oss-120b \
+  --max-concurrency 32 \
+  --output result/verification-gpt-oss-120b
+```
+
+The protocol follows the paper's three-run AIO test evaluation. From 6,824 test pairs, 1,142 pairs whose evidence is the original LLM input question are excluded, leaving 5,682 pairs. Exclusion compares evidence with the corresponding question after trimming outer whitespace. Gold labels use the six paper categories; `完全矛盾` and `推定矛盾` are normalized to the matching refutation categories. There is no new decomposition, claim selection, or retrieval during this evaluation.
+
+Metrics are pair-level accuracy and macro precision, recall, and F1 over a fixed set of six labels, with zero-division scores set to zero. Scores are averaged across three independent prediction runs; per-label metrics and confusion matrices are also saved. API failures, refusals, and incomplete outputs are explicit failed predictions counted as incorrect. Missing pairs are never silently dropped.
+
+The model and Factchecker connection are configured as for decomposition evaluation. `--runs` defaults to `3`, `--max-concurrency` to `8`, and `--request-timeout` to `60` seconds. `--limit N` marks a smoke-test subset. Each result is appended to a JSONL checkpoint, and rerunning the command resumes unprocessed pairs. `--retry-errors` retries only failed pairs; use it only when a transient failure should be retried. `--score-only` recomputes metrics without model requests. Successful predictions are preserved across retries. Changed prompts, data, models, or implementation hashes require a new output directory.
+
+The pinned branch also contains three saved GPT-4o base runs. Their scores are recomputed separately using their recorded gold labels. Those files contain 5,681 pairs: ID 7006 is absent, and three evidence passages differ from the current test data. These discrepancies are recorded in `reference_scores.json`; the current evaluation retains the extra valid pair and uses the pinned test file's evidence. The paper's GPT-4o results and the current model's results therefore have documented model, output-format, and small data differences.
+
+Snapshots, hashes, predictions, per-run scores, reference scores, and a summary are saved under the selected output directory. The main metric implementation is checked against scikit-learn, as used by the reference evaluator. No Elasticsearch instance is needed.
+
+Both evaluation runners save prompt snapshots as `prompt.yaml`. The YAML migration preserves the rendered prompt text exactly, but changes file hashes. Existing evaluation artifacts and their hashes are kept as recorded; use a new output directory for evaluations with the YAML files.
+
+## Development
+
+`uv sync --locked` includes the development group with Ruff and pre-commit. Run the checks with:
+
+```bash
+PYTHONPATH=src uv run --locked python -m unittest discover -s tests -v
+uv run --locked ruff check src tests scripts
+uv run --locked ruff format --check src tests scripts
+uv lock --check
+```
+
+To include the evaluation metric tests, use `PYTHONPATH=src uv run --locked --group evaluation python -m unittest discover -s tests -v`. These tests need no API access. Without that dependency group, metric tests are skipped.
+
+To enable the Git hooks, run `uv run --locked pre-commit install`. The hooks use the project's locked Ruff version and check that `uv.lock` is up to date.
+
+Tests mock LLM calls, retrieval, and tokenizer loading. SDK requests also run against a mock HTTP transport to check independent endpoint routing, authentication, and Azure API versions for all provider combinations. Tests cover multi-turn chat, response-specific verification and result persistence, decomposition context, conversation reset, prompt replacement, output validation, pair-level verdicts, progress, and error handling. They do not send live API requests. Decomposition accuracy evaluation uses the live Factchecker model and does not require Elasticsearch.
+
+Manage dependencies with `uv add`, `uv add --dev`, and `uv remove`. Commit changes to both `pyproject.toml` and `uv.lock` together.

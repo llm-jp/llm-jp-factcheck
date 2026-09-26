@@ -1,0 +1,848 @@
+{
+  "completed_at": "2026-09-17T02:04:16.310180+00:00",
+  "protocol": {
+    "source": {
+      "repository": "llm-jp-evidence-verification-dataset",
+      "branch": "feat/verdict_prediction",
+      "revision": "cecf2a1d2c05a71dbc8460a1476ba051d18db807",
+      "prompt_source": "scripts/prompts/verdict_prediction/6class_base_1224.txt",
+      "test_source": "data/verdict_prediction/AIO_test.json",
+      "question_source": "data/claim_decomposition/AIO.json",
+      "reference_predictions": [
+        "data/results/verdict_predicted/new/result_6class_base_1224_4.json",
+        "data/results/verdict_predicted/new/result_6class_base_1224_5.json",
+        "data/results/verdict_predicted/new/result_6class_base_1224_6.json"
+      ]
+    },
+    "model": "gpt-5.4-2026-03-05",
+    "runs": 3,
+    "dataset": "AIO test, excluding original-input evidence",
+    "pairs": 5682,
+    "excluded_input_evidence": 1142,
+    "gold_sha256": "a9218c1b75ac5ae5794ecbc46d2d74cbcce1ae2fd81bbc225b3799c3e994b49b",
+    "prompt_sha256": "17189a1c43bb10824405702c01a1a751066c5cb10ecf689b84ae00ca5a105f9d",
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "verification",
+        "strict": true,
+        "description": "Assign one of the six verdict labels to one claim-evidence pair.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "enum": [
+                "完全支持",
+                "推定支持",
+                "部分支持",
+                "完全否定",
+                "推定否定",
+                "不明"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "A brief justification in one English sentence of at most 40 words."
+            }
+          },
+          "required": [
+            "label",
+            "rationale"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "implementation_sha256": {
+      "verify.py": "6ec98d6476c4e44b48300538a4f5059f84731f75589bdb7e11500b8f1ff594c0",
+      "verdict_metrics.py": "7c5c690af25a15b0b38ac0c494b319110ec7f14a178e8372960c69df7683b75a"
+    },
+    "versions": {
+      "openai": "2.54.0"
+    },
+    "sampling": "provider defaults; no temperature, top_p, seed, or reasoning-effort override",
+    "output": "Japanese label mapped to English, followed by a short English rationale (one sentence, at most 40 words)",
+    "aggregation": "pair accuracy; macro P/R/F1 over the fixed six labels; mean and population SD over runs",
+    "errors": "explicit failed predictions count as incorrect; no missing pair is silently excluded"
+  },
+  "runs": [
+    {
+      "count": 5682,
+      "errors": 7,
+      "accuracy": 0.6268919394579373,
+      "macro": {
+        "precision": 0.40063703638264936,
+        "recall": 0.4998261984391426,
+        "f1": 0.4026407766760721
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.7060153776571687,
+          "recall": 0.8329775880469584,
+          "f1": 0.7642594859241125,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.21328671328671328,
+          "recall": 0.4128595600676819,
+          "f1": 0.2812680115273775,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.233502538071066,
+          "recall": 0.17424242424242425,
+          "f1": 0.19956616052060738,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.22916666666666666,
+          "recall": 0.7586206896551724,
+          "f1": 0.35200000000000004,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.06060606060606061,
+          "recall": 0.24242424242424243,
+          "f1": 0.09696969696969698,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9612448620082208,
+          "recall": 0.5778326861983762,
+          "f1": 0.7217813051146383,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1561,
+            221,
+            43,
+            18,
+            15,
+            14,
+            2
+          ],
+          [
+            288,
+            244,
+            22,
+            9,
+            11,
+            17,
+            0
+          ],
+          [
+            82,
+            87,
+            46,
+            6,
+            11,
+            31,
+            1
+          ],
+          [
+            6,
+            7,
+            1,
+            66,
+            3,
+            4,
+            0
+          ],
+          [
+            2,
+            6,
+            2,
+            15,
+            8,
+            0,
+            0
+          ],
+          [
+            272,
+            579,
+            83,
+            174,
+            84,
+            1637,
+            4
+          ]
+        ]
+      }
+    },
+    {
+      "count": 5682,
+      "errors": 6,
+      "accuracy": 0.6226680746216121,
+      "macro": {
+        "precision": 0.39940921678425195,
+        "recall": 0.4919363382500879,
+        "f1": 0.39984610004913795
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.7027877697841727,
+          "recall": 0.8340448239060833,
+          "f1": 0.7628111273792093,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.20210896309314588,
+          "recall": 0.38917089678510997,
+          "f1": 0.2660497397339503,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.25,
+          "recall": 0.19696969696969696,
+          "f1": 0.22033898305084745,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.22807017543859648,
+          "recall": 0.7471264367816092,
+          "f1": 0.34946236559139787,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.051470588235294115,
+          "recall": 0.21212121212121213,
+          "f1": 0.08284023668639053,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9620178041543027,
+          "recall": 0.5721849629368161,
+          "f1": 0.7175741478530324,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1563,
+            227,
+            39,
+            20,
+            13,
+            10,
+            2
+          ],
+          [
+            295,
+            230,
+            25,
+            7,
+            13,
+            21,
+            0
+          ],
+          [
+            79,
+            89,
+            52,
+            4,
+            13,
+            26,
+            1
+          ],
+          [
+            5,
+            6,
+            1,
+            65,
+            4,
+            6,
+            0
+          ],
+          [
+            2,
+            6,
+            2,
+            15,
+            7,
+            1,
+            0
+          ],
+          [
+            280,
+            580,
+            89,
+            174,
+            86,
+            1621,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "count": 5682,
+      "errors": 6,
+      "accuracy": 0.6272439281942978,
+      "macro": {
+        "precision": 0.40567141124811784,
+        "recall": 0.4987427396528793,
+        "f1": 0.40602512927400036
+      },
+      "per_label": {
+        "Fully supported": {
+          "precision": 0.7110711071107111,
+          "recall": 0.8431163287086446,
+          "f1": 0.7714843750000001,
+          "support": 1874
+        },
+        "Inferentially supported": {
+          "precision": 0.20692567567567569,
+          "recall": 0.41455160744500846,
+          "f1": 0.27605633802816903,
+          "support": 591
+        },
+        "Partially supported": {
+          "precision": 0.2552083333333333,
+          "recall": 0.1856060606060606,
+          "f1": 0.2149122807017544,
+          "support": 264
+        },
+        "Fully refuted": {
+          "precision": 0.23272727272727273,
+          "recall": 0.735632183908046,
+          "f1": 0.3535911602209945,
+          "support": 87
+        },
+        "Inferentially refuted": {
+          "precision": 0.06557377049180328,
+          "recall": 0.24242424242424243,
+          "f1": 0.10322580645161289,
+          "support": 33
+        },
+        "Not enough information": {
+          "precision": 0.9625223081499108,
+          "recall": 0.5711260148252736,
+          "f1": 0.7168808152414711,
+          "support": 2833
+        }
+      },
+      "confusion": {
+        "rows": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information"
+        ],
+        "columns": [
+          "Fully supported",
+          "Inferentially supported",
+          "Partially supported",
+          "Fully refuted",
+          "Inferentially refuted",
+          "Not enough information",
+          "Error"
+        ],
+        "counts": [
+          [
+            1580,
+            214,
+            39,
+            19,
+            9,
+            11,
+            2
+          ],
+          [
+            291,
+            245,
+            20,
+            7,
+            10,
+            18,
+            0
+          ],
+          [
+            83,
+            86,
+            49,
+            5,
+            11,
+            29,
+            1
+          ],
+          [
+            6,
+            7,
+            1,
+            64,
+            4,
+            5,
+            0
+          ],
+          [
+            1,
+            8,
+            0,
+            16,
+            8,
+            0,
+            0
+          ],
+          [
+            261,
+            624,
+            83,
+            164,
+            80,
+            1618,
+            3
+          ]
+        ]
+      }
+    }
+  ],
+  "mean": {
+    "accuracy": 0.6256013140912824,
+    "precision": 0.4019058881383397,
+    "recall": 0.4968350921140366,
+    "f1": 0.40283733533307015
+  },
+  "std": {
+    "accuracy": 0.0020790854331419924,
+    "precision": 0.0027093982676671988,
+    "recall": 0.0034920684223963823,
+    "f1": 0.0025264041666179207
+  },
+  "error_diagnostics": [
+    {
+      "ID": 2568,
+      "diagnostic_only": true,
+      "finish_reason": "stop",
+      "refusal": false,
+      "content_present": true,
+      "diagnostic_label": "Not enough information",
+      "rationale_words": 27
+    },
+    {
+      "ID": 3034,
+      "diagnostic_only": true,
+      "finish_reason": "stop",
+      "refusal": false,
+      "content_present": true,
+      "diagnostic_label": "Not enough information",
+      "rationale_words": 30
+    },
+    {
+      "ID": 3037,
+      "diagnostic_only": true,
+      "finish_reason": "content_filter",
+      "refusal": false,
+      "content_present": true,
+      "error_type": "ValueError",
+      "status_code": null,
+      "code": null,
+      "validation_error": "Structured output did not complete normally (finish_reason='content_filter')."
+    }
+  ],
+  "baseline": {
+    "report": "verification_base.json",
+    "mean": {
+      "accuracy": 0.6279479056670186,
+      "precision": 0.3989546899119302,
+      "recall": 0.48570105356637683,
+      "f1": 0.40002611129323
+    },
+    "std": {
+      "accuracy": 0.0016001621139253882,
+      "precision": 0.0019430753611078561,
+      "recall": 0.0030717040554958637,
+      "f1": 0.0009054584490381816
+    },
+    "protocol": {
+      "source": {
+        "repository": "llm-jp-evidence-verification-dataset",
+        "branch": "feat/verdict_prediction",
+        "revision": "cecf2a1d2c05a71dbc8460a1476ba051d18db807",
+        "prompt_source": "scripts/prompts/verdict_prediction/6class_base_1224.txt",
+        "test_source": "data/verdict_prediction/AIO_test.json",
+        "question_source": "data/claim_decomposition/AIO.json",
+        "reference_predictions": [
+          "data/results/verdict_predicted/new/result_6class_base_1224_4.json",
+          "data/results/verdict_predicted/new/result_6class_base_1224_5.json",
+          "data/results/verdict_predicted/new/result_6class_base_1224_6.json"
+        ]
+      },
+      "model": "gpt-5.4-2026-03-05",
+      "runs": 3,
+      "dataset": "AIO test, excluding original-input evidence",
+      "pairs": 5682,
+      "excluded_input_evidence": 1142,
+      "gold_sha256": "a9218c1b75ac5ae5794ecbc46d2d74cbcce1ae2fd81bbc225b3799c3e994b49b",
+      "prompt_sha256": "a2e7888b4799e7756535c682d373f016eeea079d01388b686a86eb8f455975fb",
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "verification",
+          "strict": true,
+          "description": "Assign one of the six verdict labels to one claim-evidence pair.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "enum": [
+                  "完全支持",
+                  "推定支持",
+                  "部分支持",
+                  "完全否定",
+                  "推定否定",
+                  "不明"
+                ]
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "implementation_sha256": {
+        "verify.py": "2053eb12177dc287cbfa20ba4d1c8c4a197f0b2d6d4e04980e670556d6004f1f",
+        "verdict_metrics.py": "7c5c690af25a15b0b38ac0c494b319110ec7f14a178e8372960c69df7683b75a"
+      },
+      "versions": {
+        "openai": "2.54.0"
+      },
+      "sampling": "provider defaults; no temperature, top_p, seed, or reasoning-effort override",
+      "output": "one Japanese label only, mapped to the corresponding English label; no rationale requested",
+      "aggregation": "pair accuracy; macro P/R/F1 over the fixed six labels; mean and population SD over runs",
+      "errors": "explicit failed predictions count as incorrect; no missing pair is silently excluded"
+    }
+  },
+  "delta": {
+    "accuracy": -0.0023465915757362454,
+    "precision": 0.0029511982264094905,
+    "recall": 0.011134038547659764,
+    "f1": 0.0028112240398401322
+  },
+  "per_label_mean": {
+    "Fully supported": {
+      "precision": 0.7066247515173508,
+      "recall": 0.8367129135538954,
+      "f1": 0.7661849961011074
+    },
+    "Inferentially supported": {
+      "precision": 0.20744045068517827,
+      "recall": 0.40552735476593343,
+      "f1": 0.27445802976316563
+    },
+    "Partially supported": {
+      "precision": 0.24623695713479976,
+      "recall": 0.1856060606060606,
+      "f1": 0.21160580809106974
+    },
+    "Fully refuted": {
+      "precision": 0.22998803827751196,
+      "recall": 0.7471264367816092,
+      "f1": 0.3516845086041308
+    },
+    "Inferentially refuted": {
+      "precision": 0.059216806444386004,
+      "recall": 0.23232323232323232,
+      "f1": 0.0943452467025668
+    },
+    "Not enough information": {
+      "precision": 0.9619283247708115,
+      "recall": 0.5737145546534886,
+      "f1": 0.7187454227363806
+    }
+  },
+  "errors": [
+    {
+      "run": 1,
+      "records": [
+        {
+          "ID": 2568,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 2581,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 3034,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 3037,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 5089,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7454,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7459,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "records": [
+        {
+          "ID": 2568,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 2581,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 3037,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 5089,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7454,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7459,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "records": [
+        {
+          "ID": 2567,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 2581,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 3037,
+          "label": null,
+          "error": {
+            "type": "ValueError",
+            "status_code": null,
+            "code": null
+          }
+        },
+        {
+          "ID": 5089,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7454,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        },
+        {
+          "ID": 7459,
+          "label": null,
+          "error": {
+            "type": "BadRequestError",
+            "status_code": 400,
+            "code": "content_filter"
+          }
+        }
+      ]
+    }
+  ],
+  "rationale_lengths": [
+    {
+      "run": 1,
+      "count": 5675,
+      "mean_words": 23.678942731277534,
+      "min_words": 11,
+      "max_words": 38,
+      "over_40_words": 0
+    },
+    {
+      "run": 2,
+      "count": 5676,
+      "mean_words": 23.6937984496124,
+      "min_words": 11,
+      "max_words": 38,
+      "over_40_words": 0
+    },
+    {
+      "run": 3,
+      "count": 5676,
+      "mean_words": 23.66155743481325,
+      "min_words": 11,
+      "max_words": 39,
+      "over_40_words": 0
+    }
+  ],
+  "paired_label_changes": [
+    {
+      "run": 1,
+      "changed_labels": 812
+    },
+    {
+      "run": 2,
+      "changed_labels": 795
+    },
+    {
+      "run": 3,
+      "changed_labels": 819
+    }
+  ],
+  "metric_parity": {
+    "sklearn_version": "1.9.1",
+    "runs": [
+      {
+        "run": 1,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      },
+      {
+        "run": 2,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      },
+      {
+        "run": 3,
+        "pairs": 5682,
+        "max_absolute_difference": 1.1102230246251565e-16,
+        "confusion_matrix_equal": true
+      }
+    ]
+  }
+}

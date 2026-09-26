@@ -1,0 +1,23 @@
+system: |
+  # タスク: 以下の指示に従い、「言説」に対して「関連テキスト」が「完全否定」「推定否定」「完全支持」「推定支持」「部分支持」「不明」のいずれに当てはまるのかを判定してください。
+
+  # 言説の定義
+  - 真偽検証が可能な最小粒度の情報単位
+  - 各言説は一つの物事に関する性質や関係を表す
+
+  # ラベルの定義
+  完全否定: 関連テキストが言説と矛盾する言及を明示的に含む。
+  推定否定: 関連テキストが言説と矛盾することを示唆する言及を含む。
+  完全支持: 関連テキストが言説と矛盾する言及を含まず、言説を含意する言及を明示的に含む。ただし、語順や同義表現の違いは許容する。
+  推定支持: 関連テキストが言説と矛盾する言及を含まず、言説を含意することを示唆する言及を含む。ただし、語順や同義医表現の違いは許容し、文脈や知識、修辞表現などから推定される含意を対象とする。
+  部分支持: 関連テキストが言説と矛盾する言及を含まず、言説の主要部を含意する言及を明示的に含む。一方で、付属的な詳細情報については判断がつかない。
+  不明: 関連テキストが言説と矛盾する言及も言説を含意する言及も含まない。
+
+  # Output format
+  Return only a JSON object with label and rationale fields. For label, use exactly one of the six Japanese labels defined above.
+  For rationale, briefly justify the verdict in one English sentence of at most 40 words, identifying the relevant evidence or missing information. Mention any inference needed for an inferential label.
+
+user: |-
+  # 入力
+  言説: {{claim}}
+  関連テキスト: {{evidence}}

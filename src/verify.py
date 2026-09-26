@@ -1,109 +1,75 @@
-import json
-from textwrap import dedent
-from typing import Any
+from __future__ import annotations
 
-from utils import client
+from pathlib import Path
 
-SYSTEM_PROMPT = dedent(
-    """\
-    You are provided with a claim and a list of evidences.
-    Your task is to determine whether the evidences support the claim.
+from clients import get_client
+from prompts import PROMPT_DIR, render_prompt
+from utils import parse_json_response
 
-    Example:
-        Input:
-            Claim: The earth is flat.
-            Evidences:
-                1. The earth is round.
-                2. Some people believe that the earth is flat, but they are wrong.
-        Output:
-            {
-                "rationale": "The claim is not supported by any of the evidences.",
-                "label": false
-            }
-    """
+DEFAULT_PROMPT_PATH = PROMPT_DIR / "verification.yaml"
+VERIFICATION_LABELS = (
+    "Fully supported",
+    "Inferentially supported",
+    "Partially supported",
+    "Fully refuted",
+    "Inferentially refuted",
+    "Not enough information",
 )
+MODEL_LABELS = dict(zip(("完全支持", "推定支持", "部分支持", "完全否定", "推定否定", "不明"), VERIFICATION_LABELS))
 
-USER_PROMPT = dedent(
-    """\
-    Determine whether the evidences support the claim:
-    ---
-    [Claim]
-    {claim}
-    ---
-    [Evidences]
-    {evidences}
-    """
-)
-
-TOOL = {
-    "type": "function",
-    "function": {
-        "name": "setVerificationResult",
-        "description": "Verify a claim according to the provided evidences.",
-        "parameters": {
+RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "verification",
+        "strict": True,
+        "description": "Assign one of the six verdict labels to one claim-evidence pair.",
+        "schema": {
             "type": "object",
             "properties": {
+                "label": {"type": "string", "enum": list(MODEL_LABELS)},
                 "rationale": {
                     "type": "string",
-                    "description": "A rationale for the verification result.",
-                },
-                "label": {
-                    "type": ["boolean", "null"],
-                    "description": "A label for the verification result. True if the claim is supported by the evidences, and False if it is not. Otherwise, null.",
+                    "description": "A brief justification in one English sentence of at most 40 words.",
                 },
             },
-            "required": ["rationale", "label"],
+            "required": ["label", "rationale"],
+            "additionalProperties": False,
         },
     },
 }
 
-TOOL_CHOICE = {"type": "function", "function": {"name": "setVerificationResult"}}
 
-
-def verify_claim(claim: str, evidences: list[str], model: str) -> dict[str, Any]:
-    """Verify a claim.
-
-    Args:
-        claim (str): A claim.
-        evidences (list[str]): A list of evidences.
-        model (str): A model.
-    """
-    formatted_evidences = "\n".join(f"- {i} {passage}" for i, passage in enumerate(evidences, start=1))
-    ret = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT.format(claim=claim, evidences=formatted_evidences)},
-        ],
-        tools=[TOOL],
-        tool_choice=TOOL_CHOICE,
+def verify_claim(
+    claim: str,
+    evidence: str,
+    model: str,
+    *,
+    prompt_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Predict a six-class verdict with a brief evidence-based justification."""
+    if not isinstance(claim, str) or not claim.strip():
+        raise ValueError("claim must be a nonempty string.")
+    if not isinstance(evidence, str):
+        raise TypeError("evidence must be one string, not a list of passages.")
+    if not evidence.strip():
+        return {"label": "Not enough information", "rationale": "No evidence was provided."}
+    messages = render_prompt(
+        DEFAULT_PROMPT_PATH if prompt_path is None else prompt_path,
+        {"claim": claim, "evidence": evidence},
+        {"claim", "evidence"},
     )
-    for tool_call in ret.choices[0].message.tool_calls:
-        if tool_call.function.name == "setVerificationResult":
-            try:
-                arguments = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                raise ValueError(f"Failed to parse JSON: {tool_call.function.arguments}")
-            if "rationale" not in arguments or "label" not in arguments:
-                raise ValueError(f"Failed to extract rationale and/or label: {tool_call.function.arguments}")
-            rationale = arguments.get("rationale")
-            if not isinstance(rationale, str):
-                raise ValueError(f"Invalid rationale: {tool_call.function.arguments}")
-            label = arguments.get("label")
-            if not isinstance(label, bool) and label is not None:
-                raise ValueError(f"Invalid label: {tool_call.function.arguments}")
-            return arguments
-        raise ValueError("Failed to extract claims")
-
-
-if __name__ == "__main__":
-    model = "gpt-4-0613"
-
-    claim = "The First World War ended in 1920."
-
-    evidences = [
-        "The First World War ended in 1918.",
-        "The First World War lasted from 1914 to 1918.",
-    ]
-
-    print(verify_claim(claim, evidences, model=model))
+    response = get_client("factchecker").chat.completions.create(
+        model=model,
+        messages=messages,
+        response_format=RESPONSE_FORMAT,
+    )
+    payload = parse_json_response(response)
+    if set(payload) != {"label", "rationale"}:
+        raise ValueError("Verification response must contain exactly 'label' and 'rationale'.")
+    label = payload["label"]
+    if not isinstance(label, str) or label not in MODEL_LABELS:
+        raise ValueError(f"Verification response 'label' must be one of {tuple(MODEL_LABELS)}.")
+    rationale = payload["rationale"]
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("Verification response 'rationale' must be a nonempty string.")
+    return {"label": MODEL_LABELS[label], "rationale": rationale.strip()}

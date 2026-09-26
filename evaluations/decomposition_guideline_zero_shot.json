@@ -1,0 +1,153 @@
+{
+  "completed_at": "2026-09-16T12:01:26.612874+00:00",
+  "protocol": {
+    "source": {
+      "repository": "llm-jp-evidence-verification-dataset",
+      "revision": "e43e3898959860caa0feaf1708e820ecec330584",
+      "prompt_source": "scripts/prompts/decomposition/manual_rule+example+expl/manual_rule+example+expl.txt",
+      "test_source": "data/aio_test.json",
+      "gold_source": "data/claim_decomposition/AIO.json"
+    },
+    "dataset": "AIO test",
+    "documents": 210,
+    "gold_claims": 1169,
+    "model": "gpt-5.4-2026-03-05",
+    "runs": 5,
+    "prompt_sha256": "6934204c9b1d45aaf8d88cdbd84b9b15870f42816e1bd4962fda6fbfcc627eed",
+    "gold_sha256": "a9d9ca91f3df01262d9625837e8c505d202f667741f8513bddb8ea0e22d3ab50",
+    "implementation_sha256": {
+      "decompose.py": "bc07fc10e467fee1d0a0645552d072fcd8745fef71a0caa1db94e46ca68dd51b",
+      "claim_metrics.py": "80328210a31bdbd4d0e0755939ada398c230fee77b9ca47e7c9109ec058b2769"
+    },
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "decomposition",
+        "strict": true,
+        "description": "Create a list of self-contained claims from generated text.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "array",
+              "description": "Claims in the same language and order as the source text.",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "claims"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "context": "none (generated text only, as in the reference experiment)",
+    "sampling": "provider defaults; no temperature, top_p, or seed override",
+    "matching": "maximum-weight one-to-one assignment, then similarity >= threshold",
+    "fuzzy_threshold": 0.8,
+    "tokenizer": "MeCab, UniDic-lite, POS noun/verb/adjective/adverb; feature[10] with surface fallback",
+    "aggregation": "macro P/R/F1 across documents, then mean and population SD across independent runs",
+    "versions": {
+      "openai": "2.54.0",
+      "mecab-python3": "1.0.12",
+      "unidic-lite": "1.0.8",
+      "scipy": "1.18.1"
+    }
+  },
+  "runs": [
+    {
+      "exact": {
+        "precision": 0.20220160791589362,
+        "recall": 0.18237824344967202,
+        "f1": 0.18948426677145214
+      },
+      "fuzzy_content": {
+        "precision": 0.5469508005222291,
+        "recall": 0.4709102009102009,
+        "f1": 0.49868292351644916
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.2167929292929293,
+        "recall": 0.19038108716680144,
+        "f1": 0.20009333724297285
+      },
+      "fuzzy_content": {
+        "precision": 0.5379615886758744,
+        "recall": 0.457647101575673,
+        "f1": 0.48731684200709063
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.20244657458943174,
+        "recall": 0.17834009905438478,
+        "f1": 0.18688590373589317
+      },
+      "fuzzy_content": {
+        "precision": 0.5433998144712431,
+        "recall": 0.46238048988048985,
+        "f1": 0.4917613501229094
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.21764498728784443,
+        "recall": 0.191554847269133,
+        "f1": 0.2010850548967869
+      },
+      "fuzzy_content": {
+        "precision": 0.5405440459011888,
+        "recall": 0.4581877117591403,
+        "f1": 0.4876670547894868
+      }
+    },
+    {
+      "exact": {
+        "precision": 0.19636913351199065,
+        "recall": 0.17129603201031773,
+        "f1": 0.18038872480461426
+      },
+      "fuzzy_content": {
+        "precision": 0.5150628736343023,
+        "recall": 0.4327472791758506,
+        "f1": 0.46317257203197115
+      }
+    }
+  ],
+  "mean": {
+    "exact": {
+      "precision": 0.20709104651961793,
+      "recall": 0.1827900617900618,
+      "f1": 0.19158745749034387
+    },
+    "fuzzy_content": {
+      "precision": 0.5367838246409675,
+      "recall": 0.45637455666027094,
+      "f1": 0.4857201484935814
+    }
+  },
+  "std": {
+    "exact": {
+      "precision": 0.008555107749167314,
+      "recall": 0.007570067556323145,
+      "f1": 0.00793087611217711
+    },
+    "fuzzy_content": {
+      "precision": 0.01126467775558766,
+      "recall": 0.012731938822554243,
+      "f1": 0.01199385452648946
+    }
+  },
+  "reference_parity": {
+    "reference_revision": "e43e3898959860caa0feaf1708e820ecec330584",
+    "reference_file": "scripts/evaluate_claim_decomposition.py",
+    "runs": 5,
+    "document_metric_comparisons": 2100,
+    "mismatches": []
+  },
+  "rescored_at": "2026-09-16T12:14:08.687164+00:00"
+}
